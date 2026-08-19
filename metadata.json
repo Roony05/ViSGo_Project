@@ -1,0 +1,6 @@
+{
+  "name": "ViS-Go - Vietnam Local Buddy & Cultural Tours",
+  "description": "On-demand P2P Local Tour Buddy & Authentic Cultural Experience Platform in Vietnam connecting international travelers with verified local hosts.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
