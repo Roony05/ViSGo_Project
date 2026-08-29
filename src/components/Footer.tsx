@@ -1,7 +1,7 @@
 import React from 'react';
 import { Language } from '../types';
-import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { LacBird } from './brand/LacBird';
 
 interface FooterProps {
   language: Language;
@@ -13,219 +13,153 @@ interface FooterProps {
   onOpenSettings?: () => void;
 }
 
+/** One row of the two link columns. Everything here goes somewhere. */
+interface FooterLink {
+  icon: string;
+  label: string;
+  onClick: () => void;
+}
+
+/**
+ * Site footer.
+ *
+ * Rebuilt from a five-column version that was mostly decoration. What went and
+ * why, because the same things grow back otherwise:
+ *
+ *   - A "Điểm đến bản địa" column of five destinations. All five called
+ *     `onTabChange('explore')` — five different labels for one destination is
+ *     not navigation, it is a list pretending to be one.
+ *   - Six `<span>` rows styled exactly like the links beside them (verification, 85%
+ *     payouts, escrow, GPS, refunds, terms). Nothing clickable, so every one
+ *     of them was a dead end that looked live.
+ *   - "ViS-Go Escrow 100%" printed twice, once as a badge and once as a list
+ *     row three columns away.
+ *   - A 24/7 hotline number that reaches nobody.
+ *   - "VietQR • VNPay • MoMo • Visa/Mastercard", none of which is wired to a
+ *     payment processor.
+ *   - A "V" tile *and* the wordmark *and* a "VIỆT NAM" badge — the same three
+ *     pieces of stacked branding the header was already trimmed down from.
+ *
+ * What is left is the mission, the signature, and links that navigate.
+ */
 export const Footer: React.FC<FooterProps> = ({
   language,
-  currency,
-  onLanguageChange,
-  onCurrencyChange,
   onOpenAuth,
   onTabChange,
   onOpenSettings,
 }) => {
   const isVi = language === 'vi';
-  const t = translations[language];
+
+  const go = (tab: string) => () => {
+    sounds.playTap();
+    onTabChange(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const explore: FooterLink[] = [
+    { icon: 'fa-compass', label: isVi ? 'Khám phá tour' : 'Explore tours', onClick: go('explore') },
+    { icon: 'fa-vr-cardboard', label: isVi ? 'Di sản 360°' : '360° heritage', onClick: go('vr-heritage') },
+    {
+      icon: 'fa-wand-magic-sparkles',
+      label: isVi ? 'Trợ lý ViS-AI' : 'ViS-AI assistant',
+      onClick: go('ai-assistant'),
+    },
+    {
+      icon: 'fa-suitcase-rolling',
+      label: isVi ? 'Chuyến đi của tôi' : 'My trips',
+      onClick: go('my-bookings'),
+    },
+  ];
+
+  const forHosts: FooterLink[] = [
+    {
+      icon: 'fa-star',
+      label: isVi ? 'Đăng ký làm Host' : 'Become a host',
+      onClick: () => {
+        sounds.playTap();
+        onOpenAuth('register');
+      },
+    },
+    {
+      icon: 'fa-palette',
+      label: isVi ? 'Host Creator Studio' : 'Host Creator Studio',
+      onClick: go('host-studio'),
+    },
+  ];
+
+  const column = (title: string, links: FooterLink[]) => (
+    <div>
+      <h4 className="text-[11px] font-bold uppercase tracking-[0.14em] text-stone-500">{title}</h4>
+      <ul className="mt-2">
+        {links.map((l) => (
+          <li key={l.label}>
+            <button
+              onClick={l.onClick}
+              /* min-h-9: at `py-1` these were 24px tall — under every mobile
+                 minimum, and the smallest targets on the page. */
+              className="flex min-h-9 w-full cursor-pointer items-center gap-2.5 py-1.5 text-xs text-stone-400 transition-colors hover:text-white"
+            >
+              <i className={`fa-solid ${l.icon} w-3.5 text-center text-[11px] text-stone-600`}></i>
+              <span>{l.label}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 
   return (
-    <footer className="bg-stone-900 text-stone-300 border-t border-stone-800 pt-14 pb-10 text-xs antialiased">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        {/* Main 4-Column Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 pb-12 border-b border-stone-800">
-          
-          {/* Brand & Mission Column (2 spans) */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-[#991B1B] border border-[#D4AF37]/40 flex items-center justify-center text-white font-serif font-black text-xl shadow-md">
-                V
-              </div>
-              <div>
-                <span className="font-serif font-black text-2xl tracking-tight text-white">ViS-Go</span>
-                <span className="ml-2 px-1.5 py-0.5 bg-[#D4AF37] text-stone-950 text-[9px] font-black rounded-md uppercase tracking-wider">
-                  VIỆT NAM
-                </span>
-              </div>
+    <footer className="border-t border-stone-800 bg-stone-900 text-stone-300 antialiased">
+      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
+        <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-[minmax(0,1.6fr)_repeat(2,minmax(0,1fr))] lg:gap-16">
+          {/* Brand */}
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-[#991B1B]">
+                <LacBird className="h-auto w-5" color="#E8C25A" />
+              </span>
+              <span className="text-xl font-black tracking-tight text-white">ViS-Go</span>
             </div>
 
-            <p className="text-stone-400 text-xs leading-relaxed max-w-sm">
+            <p className="mt-4 max-w-sm text-xs leading-relaxed text-stone-400">
               {isVi
-                ? 'Nền tảng kết nối du khách với người bạn bản địa chân thực tại Việt Nam. Khám phá ẩm thực ngõ hẻm, văn hóa phố cổ và lịch sử cùng hướng dẫn viên địa phương đã qua xác thực eKYC.'
-                : 'Empowering travelers to discover Vietnam alongside verified local buddies. Experience authentic alleyway dining, heritage walks, and hidden cultural wonders with 100% Escrow protection.'}
+                ? 'Kết nối du khách với người bạn bản địa đã qua xác minh. Ẩm thực ngõ hẻm, phố cổ và di sản — đi cùng người sống ở đó.'
+                : 'Travellers, matched with verified local hosts. Alleyway food, old quarters and heritage — seen with someone who lives there.'}
             </p>
-
-            {/* Escrow & Trust Badge */}
-            <div className="inline-flex items-center gap-2.5 p-3 rounded-2xl bg-stone-800/80 border border-stone-700/60 text-stone-300">
-              <i className="fa-solid fa-shield-halved text-[#D4AF37] text-base"></i>
-              <div>
-                <div className="text-[11px] font-bold text-white">ViS-Go Escrow 100% Protection</div>
-                <div className="text-[10px] text-stone-400">
-                  {isVi ? 'Bảo vệ tiền cọc • Hoàn tiền miễn phí trước 24h' : 'Secure payment holding • Free 24h refund'}
-                </div>
-              </div>
-            </div>
-
-            {/* Emergency Hotline */}
-            <div className="flex items-center gap-2 text-stone-400 text-[11px]">
-              <i className="fa-solid fa-headset text-amber-400"></i>
-              <span>Hotline 24/7:</span>
-              <strong className="text-white font-mono">+84 908 123 456</strong>
-            </div>
           </div>
 
-          {/* Column 2: Khám phá Điểm đến (Destinations) */}
-          <div className="space-y-3">
-            <h4 className="font-bold text-white text-xs uppercase tracking-wider font-serif">
-              {isVi ? 'Điểm Đến Bản Địa' : 'Popular Destinations'}
-            </h4>
-            <ul className="space-y-2 text-stone-400 text-xs">
-              <li>
-                <button
-                  onClick={() => onTabChange('explore')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🇻🇳 Hà Nội • Phố Cổ & Ẩm Thực
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onTabChange('explore')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🛵 TP. Hồ Chí Minh • Sài Gòn Đêm
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onTabChange('explore')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🌊 Đà Nẵng • Bán Đảo Sơn Trà
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onTabChange('explore')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🏮 Hội An • Đèn Lồng & Chùa Cầu
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onTabChange('explore')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🌸 Đà Lạt & Cố Đô Huế
-                </button>
-              </li>
-            </ul>
-          </div>
-
-          {/* Column 3: Dành cho Host (For Hosts) */}
-          <div className="space-y-3">
-            <h4 className="font-bold text-white text-xs uppercase tracking-wider font-serif">
-              {isVi ? 'Bạn Bản Địa (Host)' : 'For Local Hosts'}
-            </h4>
-            <ul className="space-y-2 text-stone-400 text-xs">
-              <li>
-                <button
-                  onClick={() => {
-                    sounds.playTap();
-                    onOpenAuth('register');
-                  }}
-                  className="hover:text-[#D4AF37] transition-colors cursor-pointer text-left flex items-center gap-1.5"
-                >
-                  <span>✨ {isVi ? 'Đăng ký làm Host bản địa' : 'Become a Local Host'}</span>
-                </button>
-              </li>
-              <li>
-                <button
-                  onClick={() => onTabChange('host-studio')}
-                  className="hover:text-white transition-colors cursor-pointer text-left"
-                >
-                  🎨 {isVi ? 'Host Creator Studio' : 'Host Creator Studio'}
-                </button>
-              </li>
-              <li>
-                <span className="text-stone-500">
-                  🛡️ {isVi ? 'Quy chuẩn eKYC CCCD/Passport' : 'eKYC ID Verification'}
-                </span>
-              </li>
-              <li>
-                <span className="text-stone-500">
-                  💳 {isVi ? 'Nhận thanh toán tự động 85%' : 'Automatic 85% Payouts'}
-                </span>
-              </li>
-            </ul>
-          </div>
-
-          {/* Column 4: An toàn & Hỗ trợ (Trust & Safety) */}
-          <div className="space-y-3">
-            <h4 className="font-bold text-white text-xs uppercase tracking-wider font-serif">
-              {isVi ? 'An Toàn & Điều Khoản' : 'Trust & Safety'}
-            </h4>
-            <ul className="space-y-2 text-stone-400 text-xs">
-              <li>
-                <span className="text-stone-400">
-                  🛡️ {isVi ? 'Ký quỹ ViS-Go Escrow 100%' : '100% Escrow Protection'}
-                </span>
-              </li>
-              <li>
-                <span className="text-stone-400">
-                  📍 {isVi ? 'Hỗ trợ định vị GPS thời gian thực' : 'Live GPS Meetup Support'}
-                </span>
-              </li>
-              <li>
-                <span className="text-stone-400">
-                  🔄 {isVi ? 'Chính sách hoàn tiền trong 24h' : '24-hour Refund Policy'}
-                </span>
-              </li>
-              <li>
-                <span className="text-stone-400">
-                  📜 {isVi ? 'Điều khoản dịch vụ & Bảo mật' : 'Terms & Privacy Policy'}
-                </span>
-              </li>
-            </ul>
-          </div>
-
+          {column(isVi ? 'Khám phá' : 'Explore', explore)}
+          {column(isVi ? 'Bạn bản địa' : 'For hosts', forHosts)}
         </div>
 
-        {/* Bottom Bar: Copyright & Settings shortcuts */}
-        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-stone-500">
-          
-          <div className="flex items-center gap-2">
-            <span>© 2026 ViS-Go Vietnam.</span>
-            <span>•</span>
-            <span>{isVi ? 'Bản quyền trải nghiệm văn hóa bản địa.' : 'All rights reserved.'}</span>
+        {/* Bottom bar */}
+        {/* `sm:pr-24` keeps this row clear of the floating ViS-AI bubble, which
+            is `fixed bottom-6 right-6` and therefore sits on top of whatever
+            the page puts in its bottom-right corner — here, the settings
+            button. */}
+        <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-stone-800 pt-6 text-[11px] text-stone-500 sm:flex-row sm:pr-24">
+          <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+            <span>© 2026 ViS-Go Vietnam</span>
+            <span aria-hidden="true">•</span>
+            <span className="inline-flex items-center gap-1.5">
+              <i className="fa-solid fa-shield-halved text-[#D4AF37]"></i>
+              {isVi ? 'Đặt chỗ miễn phí • Trả trực tiếp cho host' : 'Free to book • pay your host directly'}
+            </span>
           </div>
 
-          {/* Payment Badges & Language Selector */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-stone-800 rounded-lg text-[10px] text-stone-300">
-              <span className="text-amber-400 font-bold">VietQR</span>
-              <span>•</span>
-              <span>VNPay</span>
-              <span>•</span>
-              <span>MoMo</span>
-              <span>•</span>
-              <span>Visa/Mastercard</span>
-            </div>
-
-            {onOpenSettings && (
-              <button
-                onClick={() => {
-                  sounds.playTap();
-                  onOpenSettings();
-                }}
-                className="px-3 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                <i className="fa-solid fa-gear text-xs text-[#D4AF37]"></i>
-                <span>{isVi ? 'Cài đặt (Ngôn ngữ / Tiền tệ)' : 'Settings'}</span>
-              </button>
-            )}
-          </div>
-
+          {onOpenSettings && (
+            <button
+              onClick={() => {
+                sounds.playTap();
+                onOpenSettings();
+              }}
+              className="flex cursor-pointer items-center gap-1.5 rounded-lg bg-stone-800 px-3 py-1.5 font-bold text-stone-300 transition-colors hover:bg-stone-700 hover:text-white"
+            >
+              <i className="fa-solid fa-gear text-[#D4AF37]"></i>
+              <span>{isVi ? 'Ngôn ngữ / Tiền tệ' : 'Language / Currency'}</span>
+            </button>
+          )}
         </div>
-
       </div>
     </footer>
   );

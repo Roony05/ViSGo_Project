@@ -1,0 +1,337 @@
+rules_version = '2';
+
+// ViS-Go Firestore security rules.
+//
+// Paste into Firebase Console -> Firestore Database -> Rules -> Publish.
+//
+// Two jobs:
+//   1. Security  — a customer must not edit someone else's tour, a host must
+//                  not approve their own eKYC, nobody may read another
+//                  traveller's bookings or identity documents. Conversations
+//                  are readable by their two participants and by an admin —
+//                  that last part is a product decision, taken so that the
+//                  eKYC team can settle a dispute over what was arranged, and
+//                  travellers should be told about it in the terms.
+//   2. Cost/size — this project runs on the free Spark plan, which has no
+//                  Cloud Storage. Images therefore live inside documents as
+//                  data URLs, and Firestore rejects any document over 1 MiB.
+//                  These rules cap image fields well below that, because a
+//                  rejected write at the top of a booking flow is a much worse
+//                  failure than a rejected upload.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    // Roles live on the profile document so a client cannot claim to be an
+    // admin just by sending a field along with the request.
+    //
+    // The exists() guard matters: get() on a missing document returns null, and
+    // reading .data.role off null raises an error. That happens on the very
+    // first write a new user makes — creating their own profile — so without
+    // this guard, registration would be denied.
+    function isAdmin() {
+      return signedIn()
+             && exists(/databases/$(database)/documents/profiles/$(request.auth.uid))
+             && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    // Firestore has no "document byte size" accessor in rules — `size()` on a
+    // string gives its length, and on a map (via keys()) the field count.
+    // Those two together are enough to keep documents sane.
+    function boundedFields() {
+      return request.resource.data.keys().size() < 64;
+    }
+
+    // ~400 KB of base64 is roughly a 300 KB image: comfortably under the 1 MiB
+    // document ceiling even with the rest of the fields alongside it.
+    function boundedImage(name) {
+      return !(name in request.resource.data)
+             || (request.resource.data[name] is string
+                 && request.resource.data[name].size() < 400000);
+    }
+
+    // A profile picture is stored once, in `avatars/{uid}`, and referenced from
+    // everywhere else as `avatar:<uid>:<version>` — about fifty bytes.
+    //
+    // This cap is what keeps it that way. Inlining the picture instead is not a
+    // storage problem (1 GiB holds thirty thousand of them) but a read one:
+    // `profiles`, `tours` and `reviews` are all world-readable and the app
+    // fetches each of them whole, so a 35 KB avatar on a profile is downloaded
+    // by every visitor on every page load, and its copy on each tour is
+    // downloaded again with the catalogue. Reads are the quota that runs out
+    // first on Spark — 50,000 a day, shared by everyone using the app.
+    //
+    // 4 KB leaves room for a long signed URL and refuses anything image-shaped.
+    function boundedRef(name) {
+      return !(name in request.resource.data)
+             || (request.resource.data[name] is string
+                 && request.resource.data[name].size() < 4096);
+    }
+
+    match /profiles/{uid} {
+      // Public host cards show name, avatar, rating and city.
+      allow read: if true;
+
+      // create and update are separate rules on purpose: `resource` does not
+      // exist during a create, so any rule that reads resource.data would
+      // error out and deny the write.
+      allow create: if isSelf(uid)
+                    && boundedFields()
+                    && boundedRef('avatar')
+                    && request.resource.data.role in ['customer', 'host']
+                    // Nobody registers themselves as already eKYC-verified.
+                    && request.resource.data.get('verified', false) == false;
+
+      allow update: if boundedFields()
+                    && boundedRef('avatar')
+                    && (
+                         isAdmin()
+                         || (isSelf(uid)
+                             // You may edit your profile but not promote
+                             // yourself or hand yourself a verified badge.
+                             && request.resource.data.role == resource.data.role
+                             && request.resource.data.get('verified', false)
+                                == resource.data.get('verified', false))
+                       );
+
+      allow delete: if isAdmin();
+    }
+
+    match /avatars/{uid} {
+      // As public as the profile it belongs to: a host card has to render for a
+      // visitor who has not signed in. The difference is that it is fetched one
+      // document at a time, only when a face is actually on screen, and cached
+      // on the device afterwards.
+      allow read: if true;
+
+      // Only the account itself. Admins are deliberately not given write access
+      // here — nothing in the app needs it, and someone's own face is not an
+      // administrator's to replace.
+      allow create, update: if isSelf(uid)
+                            && request.resource.data.keys().size() <= 4
+                            && request.resource.data.dataUrl is string
+                            && request.resource.data.dataUrl.size() > 0
+                            && boundedImage('dataUrl');
+
+      allow delete: if isSelf(uid) || isAdmin();
+    }
+
+    match /tours/{tourId} {
+      // The catalogue is browsable by anonymous visitors.
+      allow read: if true;
+      // An admin may also create: the demo catalogue names demo hosts, so
+      // seeding it is the one legitimate case of writing a tour you do not own.
+      // Admins can already edit and delete any tour, so this adds no reach.
+      allow create: if signedIn() && boundedFields() && boundedImage('coverImage')
+                    && boundedRef('hostAvatar') && boundedRef('videoUrl')
+                    && (request.resource.data.hostId == request.auth.uid || isAdmin());
+      allow update: if signedIn() && boundedFields() && boundedImage('coverImage')
+                    && boundedRef('hostAvatar') && boundedRef('videoUrl')
+                    && (resource.data.hostId == request.auth.uid || isAdmin());
+      allow delete: if signedIn()
+                    && (resource.data.hostId == request.auth.uid || isAdmin());
+    }
+
+    match /videos/{videoId} {
+      // Local intro videos, chosen by ViS-Go rather than by a host.
+      //
+      // They play on the Explore page for every visitor, so the read is public
+      // and the write is administrators only — a host's own video lives on
+      // their tour document, where the tour rules already scope it to them.
+      allow read: if true;
+
+      allow create, update: if isAdmin()
+                            && boundedFields()
+                            && boundedRef('url')
+                            && request.resource.data.url is string
+                            && request.resource.data.url.size() > 0
+                            && request.resource.data.city is string;
+
+      allow delete: if isAdmin();
+    }
+
+    match /bookings/{bookingId} {
+      // A booking is private to its traveller, its host, and admins.
+      //
+      // The traveller's field is `customerId`, matching the Booking type. An
+      // earlier version of these rules said `userId`, a field no booking
+      // document has ever carried: reading a missing key raises an error in
+      // rules, and an error denies. So the traveller could neither create a
+      // booking nor read one back — only the host could see it.
+      allow read: if signedIn()
+                  && (resource.data.customerId == request.auth.uid
+                      || resource.data.hostId == request.auth.uid
+                      || isAdmin());
+      allow create: if signedIn() && boundedFields() && boundedRef('hostAvatar')
+                    && request.resource.data.customerId == request.auth.uid;
+      allow update: if signedIn() && boundedFields() && boundedRef('hostAvatar')
+                    && (resource.data.customerId == request.auth.uid
+                        || resource.data.hostId == request.auth.uid
+                        || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      // A host must not review their own tour.
+      //
+      // Nothing else stopped it. `userId == request.auth.uid` only proves the
+      // review is not written in someone else's name, and a host writing five
+      // stars under their own name satisfies that perfectly — while
+      // `ratedTours` in App.tsx derives the host's public rating from exactly
+      // these documents. So the badge on a host card was self-servable.
+      //
+      // One extra document read per review written, which is the cheapest
+      // place to buy this: the alternative is trusting a client-side check that
+      // anyone with the SDK can skip.
+      function reviewingOwnTour() {
+        return exists(/databases/$(database)/documents/tours/$(request.resource.data.tourId))
+               && get(/databases/$(database)/documents/tours/$(request.resource.data.tourId)).data.hostId
+                  == request.auth.uid;
+      }
+
+      allow read: if true;
+      allow create: if signedIn() && boundedFields() && boundedRef('userAvatar')
+                    && (request.resource.data.userId == request.auth.uid || isAdmin())
+                    && (isAdmin() || !reviewingOwnTour())
+                    && request.resource.data.rating is int
+                    && request.resource.data.rating >= 1
+                    && request.resource.data.rating <= 5;
+      allow update: if signedIn() && boundedFields() && boundedRef('userAvatar')
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if signedIn()
+                    && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /kyc/{applicationId} {
+      // A host's declared identity: readable only by them and by admins.
+      //
+      // These documents no longer carry photographs of a citizen ID card. From
+      // 1 January 2026, Nghị định 356/2025/NĐ-CP classes such an image as
+      // sensitive personal data, and this database is hosted outside Vietnam —
+      // so the cheapest way to meet the cross-border duties of Luật
+      // 91/2025/QH15 is to never hold the picture at all. What is left is five
+      // typed fields and a human reviewer.
+      allow read: if signedIn()
+                  && (resource.data.hostId == request.auth.uid || isAdmin());
+
+      // A host submits their own application, always as 'pending'. The twelve
+      // digits are checked here as well as in the form: the form is a
+      // convenience for the person typing, the rule is the guarantee.
+      function wellFormed() {
+        return request.resource.data.hostId is string
+               && request.resource.data.fullName is string
+               && request.resource.data.fullName.size() > 0
+               && request.resource.data.fullName.size() <= 120
+               && request.resource.data.cccdNumber is string
+               && request.resource.data.cccdNumber.matches('^[0-9]{12}$')
+               && request.resource.data.dateOfBirth is string
+               && request.resource.data.nationality is string
+               && request.resource.data.nationality.size() > 0
+               && request.resource.data.address is string
+               && request.resource.data.address.size() > 0
+               && request.resource.data.address.size() <= 500;
+      }
+
+      allow create: if signedIn() && boundedFields() && wellFormed()
+                    && request.resource.data.hostId == request.auth.uid
+                    && request.resource.data.status == 'pending';
+
+      // A rejected application may be corrected and re-sent by its owner, which
+      // is why update is not admin-only any more. The owner's version must
+      // still be well formed, must stay theirs, and must go back to 'pending' —
+      // nobody approves their own application.
+      allow update: if isAdmin()
+                    || (signedIn()
+                        && boundedFields()
+                        && wellFormed()
+                        && resource.data.hostId == request.auth.uid
+                        && request.resource.data.hostId == resource.data.hostId
+                        && request.resource.data.status == 'pending');
+
+      allow delete: if isAdmin();
+    }
+
+    match /conversations/{conversationId} {
+      // The conversation id is the booking id, and `participants` holds the two
+      // uids the booking named. Membership is therefore one field lookup, with
+      // no join and no way for a third party to write themselves in.
+      function participants() {
+        return get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants;
+      }
+
+      // `resource == null` first, and it is not decoration: a get() on a
+      // document that does not exist yet evaluates the rule with resource set
+      // to null, and reading .data off null raises an error — and an error
+      // denies. Without this branch the very first open of a chat would be
+      // refused, so no conversation could ever be created.
+      allow read: if signedIn()
+                  && (resource == null
+                      || isAdmin()
+                      || request.auth.uid in resource.data.participants);
+
+      // Either participant may open the thread, and only with both names on it.
+      allow create: if signedIn()
+                    && boundedFields()
+                    && request.resource.data.participants is list
+                    && request.resource.data.participants.size() == 2
+                    && request.auth.uid in request.resource.data.participants;
+
+      // Updates carry the read markers and the denormalised last-message line.
+      // The participant list is pinned: letting it change would let one side
+      // quietly add or remove the other after the fact.
+      allow update: if signedIn()
+                    && boundedFields()
+                    && request.auth.uid in resource.data.participants
+                    && request.resource.data.participants == resource.data.participants;
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        // One get() of the parent per request, not per message — rules cache a
+        // document within a single evaluation, so a page of 30 messages costs
+        // one extra read, not thirty.
+        // isAdmin() is tested first on purpose. Rules short-circuit `||`, so an
+        // admin never reaches participants() — which would call get() on a
+        // parent that may not exist yet, and error out on an empty thread.
+        allow read: if signedIn()
+                    && (isAdmin() || request.auth.uid in participants());
+
+        // You may only speak as yourself, only in a thread you belong to, and
+        // only with the server's clock. `createdAt == request.time` is what
+        // stops a message being backdated into the middle of a conversation
+        // that has already been used to settle a dispute.
+        allow create: if signedIn()
+                      && boundedFields()
+                      && request.auth.uid in participants()
+                      && request.resource.data.senderId == request.auth.uid
+                      && request.resource.data.text is string
+                      && request.resource.data.text.size() > 0
+                      && request.resource.data.text.size() <= 2000
+                      && request.resource.data.createdAt == request.time;
+
+        // Append-only. A thread nobody can rewrite is the whole point of
+        // storing it: ViS-Go's escrow promise rests on being able to say what
+        // was actually agreed, and an editable log proves nothing.
+        allow update: if false;
+
+        // The one exception, and it is a deliberate trade: an admin can remove
+        // an abusive or unlawful message. It costs a hole in the record, so it
+        // is an admin's decision and nobody else's.
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Anything not matched above is denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

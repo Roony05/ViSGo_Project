@@ -2,7 +2,14 @@ node_modules/
 build/
 dist/
 coverage/
+.firebase/
 .DS_Store
 *.log
+*.orig
+*.rej
 .env*
 !.env.example
+
+# Firebase service account key — bypasses every security rule, never commit.
+serviceAccount.json
+service-account.json

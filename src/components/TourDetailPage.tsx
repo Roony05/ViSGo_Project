@@ -1,14 +1,29 @@
 import React, { useState } from 'react';
 import { Tour, Language, TourReview, User } from '../types';
 import { translations } from '../i18n/translations';
+import { Avatar } from './Avatar';
+import { YouTubeEmbed } from './YouTubeEmbed';
+import { youTubeId } from '../utils/youtube';
+import { tourLanguageCodes } from '../utils/contentLanguage';
+import { languageLabel, languageOption } from '../data/languages';
 
-interface TourDetailModalProps {
+/**
+ * A tour's own page, at `#/tour/<id>`.
+ *
+ * This was a modal until it stopped making sense as one. A tour is the thing
+ * a visitor came to read: it has an itinerary, a host, a review list and a
+ * booking form, and none of that belongs in a box floating over the catalogue
+ * with the page scroll locked behind it. As a page it gets an address — so
+ * Back returns to Explore instead of shutting everything, a reload keeps you
+ * where you were, and the trip can be linked to.
+ */
+interface TourDetailPageProps {
   tour: Tour | null;
   language: Language;
   currency: 'VND' | 'USD';
   reviews: TourReview[];
   activeUser: User | null;
-  onClose: () => void;
+  onBack: () => void;
   onProceedBooking: (bookingDraft: {
     tour: Tour;
     date: string;
@@ -25,12 +40,13 @@ interface TourDetailModalProps {
   onOpenChat?: () => void;
 }
 
-export const TourDetailModal: React.FC<TourDetailModalProps> = ({
+export const TourDetailPage: React.FC<TourDetailPageProps> = ({
   tour,
   language,
   currency,
   reviews,
-  onClose,
+  activeUser,
+  onBack,
   onProceedBooking,
   onOpenWriteReview,
   onOpenChat,
@@ -61,7 +77,9 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
   const discountAmountVND = couponApplied ? Math.round(baseSubtotalVND * (couponDiscount / 100)) : 0;
   const totalPayableVND = Math.max(0, baseSubtotalVND - discountAmountVND);
   const totalPayableUSD = currency === 'USD' ? Math.round(totalPayableVND / 25000) : baseSubtotalUSD;
-  const platformFeeVND = Math.round(totalPayableVND * 0.15); // 15% escrow included
+  // ViS-Go's commission, owed by the host out of what the traveller pays them.
+  // It is not added to the traveller's total and nobody collects it here.
+  const platformFeeVND = Math.round(totalPayableVND * 0.15);
 
   const handleApplyCoupon = () => {
     const code = couponCode.trim().toUpperCase();
@@ -97,11 +115,22 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
   const displayMeeting = language === 'vi' ? tour.meetingPointVi : tour.meetingPoint;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 md:p-6 bg-black/70 backdrop-blur-xs overflow-y-auto animate-in fade-in">
-      <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh]">
-        
-        {/* Sticky Modal Top Bar with Cover Image */}
-        <div className="relative h-48 sm:h-64 w-full bg-stone-900 shrink-0">
+    <div className="space-y-4 animate-in fade-in duration-200">
+
+      {/* Breadcrumb. The page has a real address, so this is a link back up
+          the hierarchy rather than a dismiss control. */}
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-2 text-xs font-bold text-stone-500 hover:text-[#A82323] transition-colors cursor-pointer"
+      >
+        <i className="fa-solid fa-arrow-left"></i>
+        <span>{language === 'vi' ? 'Khám phá' : 'Explore'}</span>
+      </button>
+
+      <div className="bg-white w-full rounded-3xl shadow-xs border border-stone-200 overflow-hidden flex flex-col">
+
+        {/* Cover */}
+        <div className="relative h-52 sm:h-72 w-full bg-stone-900 shrink-0">
           <img
             src={tour.coverImage}
             alt={displayTitle}
@@ -109,14 +138,6 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/20"></div>
 
-          {/* Close Button */}
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors cursor-pointer border border-white/20 z-10"
-            aria-label="Close modal"
-          >
-            <i className="fa-solid fa-xmark text-sm"></i>
-          </button>
 
           {/* Header Meta Content */}
           <div className="absolute bottom-4 left-4 right-4 sm:left-6 sm:right-6 text-white">
@@ -139,8 +160,9 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Navigation Tabs */}
-        <div className="flex items-center border-b border-stone-200 px-6 bg-stone-50/70 shrink-0">
+        {/* Section tabs. Sticky, because on a page the reader can be deep in
+            the review list and still want to jump to the itinerary. */}
+        <div className="flex items-center border-b border-stone-200 px-4 sm:px-6 bg-stone-50/90 backdrop-blur-sm sticky top-0 z-10 overflow-x-auto">
           <button
             onClick={() => setSelectedTab('itinerary')}
             className={`py-3 px-4 text-xs font-bold border-b-2 cursor-pointer transition-colors ${
@@ -176,8 +198,8 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
           </button>
         </div>
 
-        {/* Modal Scrollable Body (2 Columns on Desktop) */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Body (2 columns on desktop). The page scrolls, not this box. */}
+        <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
           
           {/* Left Column: Details, Timeline, Inclusions (7 Cols) */}
           <div className="lg:col-span-7 space-y-6">
@@ -193,6 +215,22 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                     {displayDesc}
                   </p>
                 </div>
+
+                {/* The host's video introducing the place, if they added one.
+                    Parsed here rather than trusted: `youTubeId` returns null
+                    for anything that is not a YouTube link, and the id is what
+                    the player is rebuilt from. */}
+                {youTubeId(tour.videoUrl) && (
+                  <div>
+                    <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider mb-2">
+                      {language === 'vi' ? `Video giới thiệu ${tour.city}` : `A look at ${tour.city}`}
+                    </h4>
+                    <YouTubeEmbed
+                      videoId={youTubeId(tour.videoUrl)!}
+                      title={displayTitle}
+                    />
+                  </div>
+                )}
 
                 {/* Step-by-Step Timeline Stops */}
                 <div>
@@ -271,13 +309,13 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                 {/* Host Hero Card */}
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4 bg-gradient-to-br from-[#FAF8F5] to-white p-5 rounded-2xl border border-stone-200 shadow-xs">
                   <div className="relative shrink-0">
-                    <img
+                    <Avatar
                       src={tour.hostAvatar}
-                      alt={tour.hostName}
+                      name={tour.hostName}
                       className="w-20 h-20 rounded-full object-cover border-2 border-[#D4AF37] shadow-md bg-[#D4AF37]/20"
                     />
                     {tour.hostVerified && (
-                      <span className="absolute bottom-0 right-0 w-6 h-6 bg-[#A82323] text-white rounded-full border-2 border-white flex items-center justify-center text-[10px] shadow-xs" title="100% eKYC Verified Host">
+                      <span className="absolute bottom-0 right-0 w-6 h-6 bg-[#A82323] text-white rounded-full border-2 border-white flex items-center justify-center text-[10px] shadow-xs" title="Verified host">
                         <i className="fa-solid fa-shield-check"></i>
                       </span>
                     )}
@@ -315,11 +353,28 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                   </button>
                 </div>
 
-                {/* Spoken Languages */}
+                <div className="bg-white p-5 rounded-2xl border border-stone-200/90 shadow-2xs space-y-2">
+                  <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
+                    <i className="fa-solid fa-headset text-[#D4AF37] text-sm"></i>
+                    <span>{language === 'vi' ? 'Ngôn ngữ tour' : 'Tour languages'}</span>
+                  </h4>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {tourLanguageCodes(tour).map((code) => (
+                      <span
+                        key={code}
+                        className="px-3 py-1.5 bg-[#FAF8F5] border border-stone-200 text-stone-800 rounded-xl text-xs font-bold"
+                      >
+                        {languageOption(code)?.flag ?? '🌐'} {languageLabel(code)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Languages the host speaks, which may be broader than this tour. */}
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/90 shadow-2xs space-y-2">
                   <h4 className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
                     <i className="fa-solid fa-language text-[#D4AF37] text-sm"></i>
-                    <span>{t.languagesSpoken}</span>
+                    <span>{t.languagesSpoken} ({language === 'vi' ? 'host' : 'host'})</span>
                   </h4>
                   <div className="flex flex-wrap gap-2 pt-1">
                     {(tour.hostLanguages || tour.languages).map((l, i) => (
@@ -327,7 +382,7 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                         key={i}
                         className="px-3 py-1.5 bg-[#FAF8F5] border border-stone-200 text-stone-800 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs"
                       >
-                        <span>🗣️</span>
+                        <i className="fa-solid fa-language text-stone-500"></i>
                         <span>{l}</span>
                       </span>
                     ))}
@@ -357,7 +412,11 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                   {(tour.hostBio && tour.hostBioVi) && (
                     <details className="text-xs text-stone-600 bg-stone-50 p-3 rounded-xl border border-stone-200/60 cursor-pointer">
                       <summary className="font-semibold text-stone-700 hover:text-[#A82323]">
-                        {language === 'vi' ? '🌐 Xem bản dịch Tiếng Anh (English Bio)' : '🌐 View Vietnamese Version (Tiếng Việt)'}
+                        {/* The icon has to be a real element; when it lived
+                            inside the string literal it rendered as visible
+                            markup instead of an icon. */}
+                        <i className="fa-solid fa-globe mr-1.5 text-stone-400"></i>
+                        {language === 'vi' ? 'Xem bản dịch Tiếng Anh (English Bio)' : 'View Vietnamese Version (Tiếng Việt)'}
                       </summary>
                       <p className="mt-2 pt-2 border-t border-stone-200 text-stone-600 italic leading-relaxed whitespace-pre-line">
                         {language === 'vi' ? tour.hostBio : tour.hostBioVi}
@@ -385,7 +444,8 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                   </div>
                 )}
 
-                {/* Verification & Safety Escrow Badge */}
+                {/* Verification badge. The "cam kết bảo hiểm an toàn 24/7" it
+                    used to promise is not a policy anyone has underwritten. */}
                 <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-xs text-emerald-950 flex items-start gap-3">
                   <i className="fa-solid fa-shield-check text-emerald-700 text-lg mt-0.5 shrink-0"></i>
                   <div>
@@ -394,8 +454,8 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                     </strong>
                     <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
                       {language === 'vi'
-                        ? 'Host đã hoàn tất kiểm tra danh tính điện tử eKYC với CCCD/Hộ chiếu, xác thực lý lịch tư pháp trong sạch và cam kết bảo hiểm an toàn 24/7 cho du khách.'
-                        : 'This host has completed full biometric eKYC identity verification with Citizen ID/Passport, passed criminal background screening, and adheres to 24/7 safety standards.'}
+                        ? 'Host đã khai báo họ tên, số căn cước, ngày sinh và địa chỉ, và được quản trị viên ViS-Go duyệt.'
+                        : 'This host has declared their full name, citizen ID number, date of birth and address, and a ViS-Go administrator has reviewed them.'}
                     </p>
                   </div>
                 </div>
@@ -427,9 +487,9 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                     <div key={rev.id} className="p-4 bg-stone-50 rounded-2xl border border-stone-200 space-y-2">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2.5">
-                          <img
+                          <Avatar
                             src={rev.userAvatar}
-                            alt={rev.userName}
+                            name={rev.userName}
                             className="w-8 h-8 rounded-full object-cover"
                           />
                           <div>
@@ -465,7 +525,7 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
 
           {/* Right Column: Dynamic Booking Card Calculator (5 Cols) */}
           <div className="lg:col-span-5">
-            <div className="sticky top-2 bg-gradient-to-b from-stone-50 to-white rounded-2xl p-5 border border-stone-200 shadow-md space-y-4">
+            <div className="sticky top-16 bg-gradient-to-b from-stone-50 to-white rounded-2xl p-5 border border-stone-200 shadow-md space-y-4">
               
               {/* Pricing Header */}
               <div className="flex items-baseline justify-between pb-3 border-b border-stone-200">
@@ -604,9 +664,16 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                   </div>
                 )}
 
+                {/* The platform's commission used to be itemised here as
+                    "Service & Safety Escrow (Included)". It is neither: it is
+                    what the host owes ViS-Go afterwards, and it is no part of
+                    what the traveller hands over. What they need to know is
+                    where the money goes. */}
                 <div className="flex justify-between text-stone-500 text-[11px]">
-                  <span>{t.platformFee}</span>
-                  <span className="text-emerald-700 font-semibold">{language === 'vi' ? 'ĐÃ BAO GỒM' : 'INCLUDED'}</span>
+                  <span>{language === 'vi' ? 'Thanh toán' : 'Payment'}</span>
+                  <span className="font-semibold text-stone-600">
+                    {language === 'vi' ? 'Trả trực tiếp cho host' : 'Directly to your host'}
+                  </span>
                 </div>
 
                 <div className="pt-2 border-t border-stone-200 flex justify-between items-baseline font-bold text-stone-900 text-sm">
@@ -623,9 +690,28 @@ export const TourDetailModal: React.FC<TourDetailModalProps> = ({
                 onClick={handleReserve}
                 className="w-full py-3.5 bg-gradient-to-r from-[#A82323] to-[#8C1818] hover:from-[#8C1818] hover:to-[#6E0E0E] text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all transform active:scale-98 cursor-pointer flex items-center justify-center gap-2"
               >
-                <i className="fa-solid fa-shield-heart text-amber-300"></i>
-                <span>{t.proceedCheckout}</span>
+                {/*
+                  Say up front that an account is needed. Letting a visitor pick
+                  a date, a group size and a coupon before bouncing them to a
+                  sign-up wall is the version of this that loses the booking.
+                */}
+                <i className={`fa-solid ${activeUser ? 'fa-shield-heart' : 'fa-user-plus'} text-amber-300`}></i>
+                <span>
+                  {activeUser
+                    ? t.proceedCheckout
+                    : language === 'vi'
+                      ? 'Tạo tài khoản để đặt tour'
+                      : 'Create an account to book'}
+                </span>
               </button>
+
+              {!activeUser && (
+                <p className="mt-2 text-center text-[11px] leading-relaxed text-stone-500">
+                  {language === 'vi'
+                    ? 'Lựa chọn ngày, giờ và số khách của bạn sẽ được giữ lại.'
+                    : 'Your date, time and group size will be kept.'}
+                </p>
+              )}
 
             </div>
           </div>

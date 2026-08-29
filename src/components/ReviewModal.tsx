@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Tour, Language, User, TourReview } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { newId } from '../utils/ids';
 
 interface ReviewModalProps {
   isOpen: boolean;
@@ -26,7 +27,11 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   const [comment, setComment] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<string[]>(['Friendly Host', 'Great Food']);
 
-  if (!isOpen || !tour) return null;
+  // No signed-out path. `activeUser` used to fall back to a 'guest' id below,
+  // which produced a review the security rules refuse — written to local state,
+  // announced as sent, and gone on the next reload. App.tsx now sends visitors
+  // to sign in before this opens; this is the second lock on the same door.
+  if (!isOpen || !tour || !activeUser) return null;
 
   const availableTags = [
     'Friendly Host',
@@ -51,12 +56,12 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
     if (!comment.trim()) return;
 
     const newReview: TourReview = {
-      id: `rev_${Date.now()}`,
+      id: newId('rev'),
       tourId: tour.id,
-      userId: activeUser?.id || 'guest',
-      userName: activeUser?.name || 'Happy Traveler',
-      userAvatar: activeUser?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      userCountry: 'Traveler 🌏',
+      userId: activeUser.id,
+      userName: activeUser.name,
+      userAvatar: activeUser.avatar,
+      userCountry: 'Traveler',
       rating,
       date: new Date().toISOString().split('T')[0],
       comment,

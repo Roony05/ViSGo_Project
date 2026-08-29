@@ -3,8 +3,11 @@ import confetti from 'canvas-confetti';
 import { Tour, Booking, Language, User } from '../types';
 import { translations } from '../i18n/translations';
 import { generateBookingInvoicePDF } from '../utils/pdfGenerator';
-import { createGoogleCalendarUrl } from '../utils/calendar';
+import { createGoogleCalendarUrl, addBookingToCalendar } from '../utils/calendar';
+import { sendBookingEmail } from '../utils/googleGmail';
+import { HAS_GOOGLE_OAUTH } from '../config/env';
 import { sounds } from '../utils/audio';
+import { newBookingCode } from '../utils/ids';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -40,25 +43,48 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 }) => {
   const t = translations[language];
 
-  const [paymentMethod, setPaymentMethod] = useState<'vnpay' | 'momo' | 'card' | 'cash'>('vnpay');
-  const [fullName, setFullName] = useState(activeUser?.name || 'Sarah Jenkins');
-  const [email, setEmail] = useState(activeUser?.email || 'customer@visgo.vn');
-  const [phone, setPhone] = useState(activeUser?.phone || '+84 901 234 567');
+  // Prefilled from the signed-in account, and otherwise blank. These used to
+  // default to a demo traveller's real-looking name, email and phone number,
+  // which meant a stranger's contact details sat in the checkout form of anyone
+  // who reached it — and shipped in the bundle for anyone to read.
+  const [fullName, setFullName] = useState(activeUser?.name || '');
+  const [email, setEmail] = useState(activeUser?.email || '');
+  const [phone, setPhone] = useState(activeUser?.phone || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
   const [showGmailModal, setShowGmailModal] = useState(false);
-  const [gmailSentAlert, setGmailSentAlert] = useState(false);
+
+  // Real integration status, so the UI never claims something that didn't happen.
+  const [mailStatus, setMailStatus] = useState<'idle' | 'sending' | 'sent' | 'compose' | 'error'>('idle');
+  const [mailDetail, setMailDetail] = useState<string>('');
+  const [calendarStatus, setCalendarStatus] = useState<'idle' | 'working' | 'created' | 'template' | 'error'>('idle');
+  const [calendarEventUrl, setCalendarEventUrl] = useState<string>('');
 
   if (!isOpen || !draftBooking) return null;
 
-  const handlePayNow = (e: React.FormEvent) => {
+  /**
+   * Sends the reservation. No money moves here, and none is meant to.
+   *
+   * This modal used to offer VNPay, MoMo, a card and cash, take one of them,
+   * and confirm the booking itself with a lock icon and "Securing booking in
+   * Escrow…". Not one of those methods charged anything — the choice was
+   * written onto the record and never used again — and escrow is not something
+   * this platform may lawfully do: holding a traveller's money for a host is a
+   * payment intermediary service, which under Nghị định 52/2024/NĐ-CP needs a
+   * State Bank licence.
+   *
+   * So what happens is what actually happened all along: the traveller's
+   * details are recorded, the request goes to the host, and the host decides.
+   * The traveller settles with them in person.
+   */
+  const handleRequestBooking = (e: React.FormEvent) => {
     e.preventDefault();
     setIsProcessing(true);
 
     setTimeout(() => {
       setIsProcessing(false);
       const newBooking: Booking = {
-        id: `VIS-${Math.floor(1000 + Math.random() * 9000)}`,
+        id: newBookingCode(),
         tourId: draftBooking.tour.id,
         tourTitle: draftBooking.tour.title,
         tourTitleVi: draftBooking.tour.titleVi,
@@ -78,8 +104,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         totalPriceVND: draftBooking.totalVND,
         totalPriceUSD: draftBooking.totalUSD,
         platformFeeVND: draftBooking.platformFeeVND,
-        status: 'confirmed',
-        paymentMethod: paymentMethod,
+        // The host confirms, not this form. Nothing else can: there is no
+        // payment to succeed, so a booking that confirmed itself would be
+        // telling a traveller their place is held before anyone had agreed.
+        status: 'pending',
         createdAt: new Date().toISOString().split('T')[0],
         notes: draftBooking.specialNotes,
         meetingPoint: language === 'vi' ? draftBooking.tour.meetingPointVi : draftBooking.tour.meetingPoint,
@@ -109,7 +137,53 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     }
   };
 
-  const calendarUrl = confirmedBooking ? createGoogleCalendarUrl(confirmedBooking) : '#';
+  const tourDurationHours = draftBooking.tour.durationHours || 3;
+
+  // Kept for the right-click / copy-link affordance; the button below uses the
+  // API path when OAuth is configured.
+  const calendarUrl = confirmedBooking
+    ? createGoogleCalendarUrl(confirmedBooking, language, tourDurationHours)
+    : '#';
+
+  const handleAddToCalendar = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!confirmedBooking) return;
+    // Let plain <a> navigation handle the no-OAuth case natively.
+    if (!HAS_GOOGLE_OAUTH) return;
+
+    e.preventDefault();
+    setCalendarStatus('working');
+
+    const result = await addBookingToCalendar(confirmedBooking, language, tourDurationHours);
+    setCalendarEventUrl(result.eventUrl || '');
+    setCalendarStatus(result.mode === 'created' ? 'created' : 'template');
+    if (result.mode === 'created') sounds.playSuccessChime();
+  };
+
+  const handleSendEmail = async () => {
+    if (!confirmedBooking) return;
+    setMailStatus('sending');
+    setMailDetail('');
+
+    const result = await sendBookingEmail(confirmedBooking, language);
+
+    if (result.mode === 'sent') {
+      setMailStatus('sent');
+      sounds.playNotificationPing();
+      setTimeout(() => setShowGmailModal(false), 2200);
+      return;
+    }
+
+    setMailStatus('compose');
+    setMailDetail(
+      result.degradedReason
+        ? language === 'vi'
+          ? 'Không gửi tự động được, đã mở cửa sổ soạn thư Gmail với nội dung điền sẵn.'
+          : 'Automatic sending was unavailable, so a pre-filled Gmail compose window was opened instead.'
+        : language === 'vi'
+          ? 'Đã mở cửa sổ soạn thư Gmail với nội dung điền sẵn. Bạn chỉ cần bấm Gửi.'
+          : 'A pre-filled Gmail compose window was opened. Just press Send.'
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/75 backdrop-blur-xs overflow-y-auto animate-in fade-in">
@@ -119,14 +193,20 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         <div className="bg-gradient-to-r from-[#A82323] via-[#8C1818] to-[#690E0E] p-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-300/40 flex items-center justify-center text-amber-300 font-bold">
-              <i className="fa-solid fa-lock text-sm"></i>
+              {/* A padlock is the icon for "your payment is secured". Nothing is
+                  paid here, so it was promising the wrong thing. */}
+              <i className={`fa-solid ${confirmedBooking ? 'fa-circle-check' : 'fa-paper-plane'} text-sm`}></i>
             </div>
             <div>
               <h3 className="font-serif font-bold text-base sm:text-lg">
                 {confirmedBooking ? t.bookingSuccessTitle : t.checkoutTitle}
               </h3>
               <p className="text-xs text-stone-200/90 font-medium">
-                {confirmedBooking ? `Booking Reference: #${confirmedBooking.id}` : '256-bit SSL Escrow Encrypted'}
+                {confirmedBooking
+                  ? `${language === 'vi' ? 'Mã đặt chỗ' : 'Booking reference'}: #${confirmedBooking.id}`
+                  : language === 'vi'
+                    ? 'Chưa thanh toán — chỉ gửi yêu cầu tới host'
+                    : 'No payment — this only sends a request to your host'}
               </p>
             </div>
           </div>
@@ -207,10 +287,25 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     href={calendarUrl}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={handleAddToCalendar}
                     className="py-2.5 px-3 bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
-                    <i className="fa-regular fa-calendar-plus text-blue-600"></i>
-                    <span>{t.addToGoogleCalendar}</span>
+                    {calendarStatus === 'working' ? (
+                      <>
+                        <i className="fa-solid fa-spinner fa-spin text-blue-600"></i>
+                        <span>{language === 'vi' ? 'Đang thêm vào lịch...' : 'Adding to calendar...'}</span>
+                      </>
+                    ) : calendarStatus === 'created' ? (
+                      <>
+                        <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                        <span>{language === 'vi' ? 'Đã thêm vào lịch' : 'Added to calendar'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="fa-regular fa-calendar-plus text-blue-600"></i>
+                        <span>{t.addToGoogleCalendar}</span>
+                      </>
+                    )}
                   </a>
 
                   <button
@@ -218,10 +313,31 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     onClick={() => setShowGmailModal(true)}
                     className="py-2.5 px-3 bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
-                    <i className="fa-regular fa-envelope text-red-600"></i>
-                    <span>{t.sendGmailReceipt}</span>
+                    {mailStatus === 'sent' ? (
+                      <>
+                        <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                        <span>{language === 'vi' ? 'Đã gửi email' : 'Email sent'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <i className="fa-regular fa-envelope text-red-600"></i>
+                        <span>{t.sendGmailReceipt}</span>
+                      </>
+                    )}
                   </button>
                 </div>
+
+                {/* Link to the freshly created calendar event */}
+                {calendarStatus === 'created' && calendarEventUrl && (
+                  <a
+                    href={calendarEventUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-[11px] text-blue-700 hover:text-blue-900 underline font-semibold"
+                  >
+                    {language === 'vi' ? 'Mở sự kiện trong Google Calendar →' : 'Open the event in Google Calendar →'}
+                  </a>
+                )}
 
                 {/* Open Live GPS Radar */}
                 <button
@@ -240,7 +356,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
           ) : (
             /* CHECKOUT FORM STATE */
-            <form onSubmit={handlePayNow} className="space-y-4">
+            <form onSubmit={handleRequestBooking} className="space-y-4">
               
               {/* Order Quick Summary Header */}
               <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200/80 flex items-center gap-3">
@@ -273,6 +389,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <input
                       type="text"
                       required
+                      autoComplete="name"
+                      placeholder={language === 'vi' ? 'Họ và tên trên giấy tờ' : 'Full name as on your ID'}
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
@@ -283,6 +401,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <input
                       type="tel"
                       required
+                      autoComplete="tel"
+                      placeholder="+84 …"
                       value={phone}
                       onChange={(e) => setPhone(e.target.value)}
                       className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
@@ -294,6 +414,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <input
                     type="email"
                     required
+                    autoComplete="email"
+                    placeholder="name@example.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="w-full px-3 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-900 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
@@ -301,124 +423,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </div>
               </div>
 
-              {/* Step 2: Payment Methods */}
-              <div className="space-y-2">
-                <h4 className="text-xs font-bold text-stone-700 uppercase tracking-wider">
-                  {t.step2Payment}
-                </h4>
-                
-                <div className="space-y-2">
-                  {/* VNPay */}
-                  <label
-                    onClick={() => setPaymentMethod('vnpay')}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === 'vnpay'
-                        ? 'border-[#A82323] bg-red-50/50 ring-1 ring-[#A82323]'
-                        : 'border-stone-200 hover:bg-stone-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-blue-600 text-white font-black text-xs flex items-center justify-center">
-                        VN
-                      </div>
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">{t.paymentMethodVnpay}</span>
-                        <span className="text-[10px] text-stone-500">VietQR, Vietcombank, Techcombank, BIDV</span>
-                      </div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      checked={paymentMethod === 'vnpay'}
-                      onChange={() => setPaymentMethod('vnpay')}
-                      className="accent-[#A82323]"
-                    />
-                  </label>
-
-                  {/* MoMo */}
-                  <label
-                    onClick={() => setPaymentMethod('momo')}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === 'momo'
-                        ? 'border-[#A82323] bg-red-50/50 ring-1 ring-[#A82323]'
-                        : 'border-stone-200 hover:bg-stone-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-pink-600 text-white font-bold text-xs flex items-center justify-center">
-                        Mo
-                      </div>
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">{t.paymentMethodMomo}</span>
-                        <span className="text-[10px] text-stone-500">MoMo QR & Instant E-Wallet</span>
-                      </div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      checked={paymentMethod === 'momo'}
-                      onChange={() => setPaymentMethod('momo')}
-                      className="accent-[#A82323]"
-                    />
-                  </label>
-
-                  {/* Card */}
-                  <label
-                    onClick={() => setPaymentMethod('card')}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === 'card'
-                        ? 'border-[#A82323] bg-red-50/50 ring-1 ring-[#A82323]'
-                        : 'border-stone-200 hover:bg-stone-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-stone-800 text-white flex items-center justify-center text-xs">
-                        <i className="fa-brands fa-cc-visa"></i>
-                      </div>
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">{t.paymentMethodCard}</span>
-                        <span className="text-[10px] text-stone-500">Visa, Mastercard, JCB, Amex</span>
-                      </div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      checked={paymentMethod === 'card'}
-                      onChange={() => setPaymentMethod('card')}
-                      className="accent-[#A82323]"
-                    />
-                  </label>
-
-                  {/* Cash */}
-                  <label
-                    onClick={() => setPaymentMethod('cash')}
-                    className={`flex items-center justify-between p-3 rounded-xl border cursor-pointer transition-all ${
-                      paymentMethod === 'cash'
-                        ? 'border-[#A82323] bg-red-50/50 ring-1 ring-[#A82323]'
-                        : 'border-stone-200 hover:bg-stone-50'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs">
-                        <i className="fa-solid fa-money-bill-1-wave"></i>
-                      </div>
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">{t.paymentMethodCash}</span>
-                        <span className="text-[10px] text-stone-500">Pay direct to buddy upon meeting</span>
-                      </div>
-                    </div>
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      checked={paymentMethod === 'cash'}
-                      onChange={() => setPaymentMethod('cash')}
-                      className="accent-[#A82323]"
-                    />
-                  </label>
-                </div>
+              {/* Where Step 2 used to be: a choice of four payment methods,
+                  none of which took a payment. What replaces it is the one
+                  thing a traveller actually needs to know before sending the
+                  request — that the money is settled in person, with the host. */}
+              <div className="p-3.5 bg-stone-50 border border-stone-200 rounded-xl space-y-1.5">
+                <p className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                  <i className="fa-solid fa-hand-holding-heart text-[#A82323]"></i>
+                  {language === 'vi' ? 'Chưa thanh toán gì lúc này' : 'Nothing is charged now'}
+                </p>
+                <p className="text-[11px] text-stone-600 leading-relaxed">
+                  {language === 'vi'
+                    ? `Bạn gửi yêu cầu đặt chỗ, host xác nhận lại, rồi hai bên gặp nhau. Số tiền ${draftBooking.totalVND.toLocaleString('vi-VN')}₫ trả trực tiếp cho host khi gặp mặt.`
+                    : `You send a request, the host confirms it, and you meet. The ${draftBooking.totalVND.toLocaleString('vi-VN')}₫ is settled directly with your host when you do.`}
+                </p>
               </div>
 
-              {/* Submit Pay Now Button */}
               <button
                 type="submit"
                 disabled={isProcessing}
@@ -427,12 +447,12 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 {isProcessing ? (
                   <>
                     <i className="fa-solid fa-spinner fa-spin"></i>
-                    <span>{language === 'vi' ? 'Đang xử lý giao dịch an toàn...' : 'Securing booking in Escrow...'}</span>
+                    <span>{language === 'vi' ? 'Đang gửi yêu cầu…' : 'Sending your request…'}</span>
                   </>
                 ) : (
                   <>
-                    <i className="fa-solid fa-lock text-amber-300"></i>
-                    <span>{t.payNow} ({currency === 'USD' ? `$${draftBooking.totalUSD}` : `${draftBooking.totalVND.toLocaleString('vi-VN')}₫`})</span>
+                    <i className="fa-solid fa-paper-plane text-amber-300"></i>
+                    <span>{language === 'vi' ? 'Gửi yêu cầu đặt chỗ' : 'Send booking request'}</span>
                   </>
                 )}
               </button>
@@ -453,7 +473,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             <div className="bg-[#EA4335] text-white px-4 py-3 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <i className="fa-solid fa-envelope text-lg"></i>
-                <span className="font-bold text-xs">Gmail Simulation Preview</span>
+                <span className="font-bold text-xs">
+                  {HAS_GOOGLE_OAUTH
+                    ? language === 'vi' ? 'Gửi qua Gmail API' : 'Send via Gmail API'
+                    : language === 'vi' ? 'Xem trước & soạn thư Gmail' : 'Preview & compose in Gmail'}
+                </span>
               </div>
               <button
                 onClick={() => setShowGmailModal(false)}
@@ -474,7 +498,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <strong>To:</strong> {confirmedBooking.customerName} &lt;{confirmedBooking.customerEmail}&gt;
                 </div>
                 <h3 className="font-bold text-sm text-stone-900 mt-2">
-                  🎉 Confirmed: Your Cultural Tour #{confirmedBooking.id} with {confirmedBooking.hostName}
+                  Confirmed: Your Cultural Tour #{confirmedBooking.id} with {confirmedBooking.hostName}
                 </h3>
               </div>
 
@@ -490,11 +514,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </p>
 
                 <div className="p-3 bg-white rounded-lg border border-stone-200 space-y-1.5 font-mono text-[11px]">
-                  <div>📍 <strong>Meeting Point:</strong> {confirmedBooking.meetingPoint}</div>
-                  <div>🗓️ <strong>Date & Time:</strong> {confirmedBooking.bookingDate} @ {confirmedBooking.bookingTime}</div>
-                  <div>👤 <strong>Host Buddy:</strong> {confirmedBooking.hostName} ({confirmedBooking.hostPhone})</div>
-                  <div>🎟️ <strong>Travelers:</strong> {confirmedBooking.guestsCount} guests</div>
-                  <div>💰 <strong>Total Paid:</strong> {confirmedBooking.totalPriceVND.toLocaleString('vi-VN')} VND</div>
+                  <div><strong>Meeting Point:</strong> {confirmedBooking.meetingPoint}</div>
+                  <div><strong>Date &amp; Time:</strong> {confirmedBooking.bookingDate} @ {confirmedBooking.bookingTime}</div>
+                  <div><strong>Host Buddy:</strong> {confirmedBooking.hostName} ({confirmedBooking.hostPhone})</div>
+                  <div><strong>Travelers:</strong> {confirmedBooking.guestsCount} guests</div>
+                  <div><strong>Total Paid:</strong> {confirmedBooking.totalPriceVND.toLocaleString('vi-VN')} VND</div>
                 </div>
 
                 <p className="text-[11px] text-stone-500 italic">
@@ -502,23 +526,52 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </p>
               </div>
 
-              {gmailSentAlert && (
+              {mailStatus === 'sent' && (
                 <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-lg text-center font-bold text-xs border border-emerald-300">
-                  ✓ Itinerary sent directly to {confirmedBooking.customerEmail}!
+                  ✓ {language === 'vi'
+                    ? `Đã gửi lịch trình tới ${confirmedBooking.customerEmail}`
+                    : `Itinerary sent to ${confirmedBooking.customerEmail}`}
+                </div>
+              )}
+
+              {mailStatus === 'compose' && (
+                <div className="p-2.5 bg-amber-50 text-amber-900 rounded-lg text-xs border border-amber-300 leading-relaxed">
+                  <i className="fa-solid fa-circle-info mr-1.5"></i>
+                  {mailDetail}
+                </div>
+              )}
+
+              {!HAS_GOOGLE_OAUTH && mailStatus === 'idle' && (
+                <div className="p-2.5 bg-stone-100 text-stone-700 rounded-lg text-[11px] border border-stone-300 leading-relaxed">
+                  <i className="fa-solid fa-circle-info mr-1.5"></i>
+                  {language === 'vi'
+                    ? 'Chưa cấu hình VITE_GOOGLE_CLIENT_ID. Bấm nút dưới để mở cửa sổ soạn thư Gmail với nội dung điền sẵn — bạn chỉ cần bấm Gửi. Thêm Client ID vào .env để gửi tự động.'
+                    : 'VITE_GOOGLE_CLIENT_ID is not configured. The button below opens a pre-filled Gmail compose window — just press Send. Add a Client ID to .env to send automatically.'}
                 </div>
               )}
 
               <div className="flex justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setGmailSentAlert(true);
-                    sounds.playNotificationPing();
-                    setTimeout(() => setShowGmailModal(false), 1500);
-                  }}
-                  className="px-4 py-2 bg-[#EA4335] hover:bg-[#D93025] text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  onClick={handleSendEmail}
+                  disabled={mailStatus === 'sending' || mailStatus === 'sent'}
+                  className="px-4 py-2 bg-[#EA4335] hover:bg-[#D93025] disabled:opacity-60 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-2"
                 >
-                  Send Copy to Gmail Inbox
+                  {mailStatus === 'sending' ? (
+                    <>
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>{language === 'vi' ? 'Đang gửi...' : 'Sending...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <i className="fa-solid fa-paper-plane"></i>
+                      <span>
+                        {HAS_GOOGLE_OAUTH
+                          ? language === 'vi' ? 'Gửi email ngay' : 'Send email now'
+                          : language === 'vi' ? 'Mở Gmail soạn thư' : 'Open Gmail compose'}
+                      </span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

@@ -1,0 +1,28 @@
+# Netlify deployment for ViS-Go.
+#
+# Two halves: the Vite build goes to the CDN as static files, and the four
+# /api routes run as one Netlify Function (netlify/functions/api.mts).
+#
+# The point of the split is that GEMINI_API_KEY and MAPILLARY_TOKEN stay in the
+# function's environment and never reach the browser bundle. Set them in
+# Site configuration -> Environment variables, NOT in this file, which is
+# committed to the repository.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  # Pinned so a platform default bump cannot silently change runtime behaviour.
+  NODE_VERSION = "22"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Single-page app fallback: any path the CDN has no file for renders index.html
+# and React Router takes over. The function declares its own /api/* route, which
+# Netlify matches before this catch-all.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

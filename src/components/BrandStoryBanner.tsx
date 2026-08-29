@@ -12,7 +12,7 @@ export const BrandStoryBanner: React.FC<BrandStoryBannerProps> = ({ language, on
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-1 shrink-0">
-      <div className="bg-[#A82323] rounded-2xl relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between px-6 sm:px-10 py-5 sm:py-6 shadow-regal border-b-4 border-[#D4AF37] text-white">
+      <div className="bg-[#A82323] rounded-2xl relative overflow-hidden px-4 sm:px-10 py-5 sm:py-6 shadow-regal border-b-4 border-[#D4AF37] text-white">
         
         {/* Subtle traditional geometric pattern */}
         <div className="absolute right-0 top-0 opacity-10 h-full pointer-events-none">
@@ -23,7 +23,7 @@ export const BrandStoryBanner: React.FC<BrandStoryBannerProps> = ({ language, on
         <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#D4AF37_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none"></div>
 
         {/* Title and message */}
-        <div className="relative z-10 flex-1 pr-4">
+        <div className="relative z-10 pr-12">
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-[#D4AF37]"></span>
             <span className="text-[10px] uppercase font-bold tracking-widest text-[#D4AF37]">
@@ -40,34 +40,27 @@ export const BrandStoryBanner: React.FC<BrandStoryBannerProps> = ({ language, on
           </p>
         </div>
 
-        {/* Highlights & Dismiss */}
-        <div className="relative z-10 flex items-center justify-between md:justify-end gap-6 sm:gap-8 mt-4 md:mt-0 pt-3 md:pt-0 border-t md:border-t-0 border-white/20">
-          
-          <div className="text-center">
-            <p className="text-[#D4AF37] text-xl sm:text-2xl font-black">4.95/5</p>
-            <p className="text-white/70 text-[10px] uppercase tracking-widest font-semibold">
-              {language === 'vi' ? 'An toàn & Uy tín' : 'Average Safety'}
-            </p>
-          </div>
+        {/*
+          Dismiss only.
 
-          <div className="text-center border-l border-white/20 pl-6 sm:pl-8">
-            <p className="text-[#D4AF37] text-xl sm:text-2xl font-black">12,400+</p>
-            <p className="text-white/70 text-[10px] uppercase tracking-widest font-semibold">
-              {language === 'vi' ? 'Host Xác Thực' : 'Verified Hosts'}
-            </p>
-          </div>
-
-          <button
+          This cluster used to carry "4.95/5 An toàn & Uy tín" and "12,400+ Host
+          xác thực" in gold display type. Both were hard-coded: the catalogue
+          holds a handful of verified hosts, and the rating shown on a tour card
+          is derived from the reviews that actually exist. Printing figures the
+          database cannot support undercuts every real number elsewhere on the
+          page, so they are gone rather than recalculated — the banner's job is
+          the invitation, and the proof belongs on the cards.
+        */}
+        <button
             onClick={onDismiss}
-            className="ml-2 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 transition-colors cursor-pointer shrink-0"
+            className="absolute right-3 top-3 z-10 cursor-pointer rounded-full bg-white/10 p-2 text-white transition-colors hover:bg-white/20"
             title={t.dismiss}
             aria-label="Dismiss banner"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          </button>
-        </div>
+        </button>
 
       </div>
     </div>

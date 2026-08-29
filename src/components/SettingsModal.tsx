@@ -84,7 +84,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'border-stone-200 hover:border-stone-300 bg-stone-50'
                 }`}
               >
-                <span className="text-2xl">🇻🇳</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#991B1B] text-[11px] font-bold tracking-wide text-white">VI</span>
                 <div>
                   <div className="text-sm font-bold text-stone-900">Tiếng Việt</div>
                   <div className="text-[11px] text-stone-500">
@@ -108,7 +108,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     : 'border-stone-200 hover:border-stone-300 bg-stone-50'
                 }`}
               >
-                <span className="text-2xl">🇬🇧</span>
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-stone-700 text-[11px] font-bold tracking-wide text-white">EN</span>
                 <div>
                   <div className="text-sm font-bold text-stone-900">English</div>
                   <div className="text-[11px] text-stone-500">
@@ -213,16 +213,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
 
-          {/* 4. Escrow & Security Trust info */}
+          {/* 4. How payment works.
+              This block promised "100% ViS-Go Escrow Protection". Escrow is a
+              licensed payment activity, and this platform takes no money at
+              all — so the badge described a protection nobody had. */}
           <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl text-[11px] text-amber-900 space-y-1">
             <div className="font-bold flex items-center gap-1.5">
-              <i className="fa-solid fa-shield-halved text-[#D4AF37]"></i>
-              {language === 'vi' ? 'Bảo vệ Ký quỹ ViS-Go Escrow 100%' : '100% ViS-Go Escrow Protection'}
+              <i className="fa-solid fa-hand-holding-heart text-[#D4AF37]"></i>
+              {language === 'vi' ? 'Thanh toán trực tiếp với host' : 'You pay your host directly'}
             </div>
             <p className="text-amber-800/90 leading-relaxed">
               {language === 'vi'
-                ? 'Mọi giao dịch trên nền tảng được mã hóa an toàn và bảo đảm tiền cọc đến khi hoàn tất chuyến đi.'
-                : 'All platform bookings are encrypted and protected in escrow until your tour completes successfully.'}
+                ? 'ViS-Go không thu tiền và không giữ tiền hộ. Bạn gửi yêu cầu đặt chỗ, host xác nhận, và hai bên thanh toán trực tiếp khi gặp mặt.'
+                : 'ViS-Go neither takes nor holds money. You send a booking request, your host confirms it, and the two of you settle in person.'}
             </p>
           </div>
 

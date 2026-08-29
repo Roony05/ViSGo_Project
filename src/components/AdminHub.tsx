@@ -1,36 +1,138 @@
-import React, { useState } from 'react';
-import { HostKycApplication, Tour, Language } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Booking, HostKycApplication, LocalVideo, Tour, User, Language, UserRole } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { formatCccd } from '../utils/cccd';
+import { Avatar } from './Avatar';
+import { LocalVideoManager } from './LocalVideoManager';
+import { AdminDashboard } from './AdminDashboard';
 
 interface AdminHubProps {
   kycApplications: HostKycApplication[];
   tours: Tour[];
+  bookings: Booking[];
+  users: User[];
+  /** The signed-in administrator. Needed to stop one demoting themselves. */
+  activeUser: User | null;
+  /**
+   * Opens a trip's message thread. Admins can read any conversation — a
+   * deliberate product decision, so that a dispute about what was arranged can
+   * actually be settled — but the rules still refuse to let them post in it.
+   */
+  onOpenConversation: (booking: Booking) => void;
   language: Language;
   currency: 'VND' | 'USD';
+  localVideos: LocalVideo[];
+  onSaveLocalVideos: (videos: LocalVideo[]) => void;
+  onDeleteLocalVideo: (id: string) => void;
   onApproveKyc: (appId: string) => void;
   onRejectKyc: (appId: string) => void;
   onToggleFeatureTour: (tourId: string) => void;
+  /**
+   * Grants or revokes the `admin` role on someone else's profile.
+   *
+   * This is the only way an account can become an administrator. Registration
+   * cannot do it — firestore.rules pin profile *creation* to
+   * `role in ['customer','host']` — and no user may edit their own role, since
+   * the self-update branch requires `request.resource.data.role ==
+   * resource.data.role`. The one branch that can change a role is `isAdmin()`,
+   * and `isAdmin()` reads the caller's own profile document on the server. So
+   * the chain has to start somewhere outside the app: the seeded operations
+   * account, written by the Admin SDK in `scripts/seed-firestore.ts`.
+   */
+  onSetUserRole: (user: User, role: UserRole) => void;
 }
 
 export const AdminHub: React.FC<AdminHubProps> = ({
   kycApplications,
   tours,
+  bookings,
+  users,
+  activeUser,
+  onOpenConversation,
   language,
   currency,
+  localVideos,
+  onSaveLocalVideos,
+  onDeleteLocalVideo,
   onApproveKyc,
   onRejectKyc,
   onToggleFeatureTour,
+  onSetUserRole,
 }) => {
   const t = translations[language];
   const [selectedKyc, setSelectedKyc] = useState<HostKycApplication | null>(kycApplications[0] || null);
-  const [activeTab, setActiveTab] = useState<'kyc' | 'tours' | 'safety'>('kyc');
 
-  // Metrics
-  const totalGmvVND = 148500000;
-  const escrowFeeVND = Math.round(totalGmvVND * 0.15); // 22.2M VND
-  const activeHostsCount = 48;
-  const liveBookingsCount = 14;
+  /**
+   * The applications arrive from Firestore after this component mounts, so the
+   * initial state above is almost always null on a fresh sign-in — leaving the
+   * detail panel blank next to a populated list. Select the first one as soon
+   * as there is one, and follow it when an approval rewrites the row.
+   */
+  useEffect(() => {
+    if (kycApplications.length === 0) {
+      setSelectedKyc(null);
+      return;
+    }
+    setSelectedKyc((current) =>
+      current ? kycApplications.find((k) => k.id === current.id) ?? kycApplications[0] : kycApplications[0],
+    );
+  }, [kycApplications]);
+  /* The console opens on the numbers. Verification is the queue an admin
+     comes here to work through, but what the platform did this month is
+     what they came to find out. */
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'kyc' | 'tours' | 'videos' | 'safety' | 'team'>('dashboard');
+  const [memberQuery, setMemberQuery] = useState('');
+
+  const admins = useMemo(() => users.filter((u) => u.role === 'admin'), [users]);
+
+  /**
+   * Candidates for promotion.
+   *
+   * Searched rather than listed: the profile list grows with every signup, and
+   * granting admin is a deliberate act aimed at one person you already know,
+   * not something to do by scrolling. An empty box therefore shows nothing.
+   */
+  const memberMatches = useMemo(() => {
+    const q = memberQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    return users
+      .filter((u) => u.role !== 'admin')
+      .filter((u) => u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q))
+      .slice(0, 8);
+  }, [users, memberQuery]);
+
+  /**
+   * Platform metrics, counted from the bookings and profiles in Firestore.
+   *
+   * These were four hard-coded constants — 148.5M in GMV, 48 hosts, 14 live
+   * trips — displayed as if they were measurements. An operations console that
+   * shows invented numbers is worse than one that shows a zero, because a zero
+   * is at least true and tells you the platform is quiet.
+   *
+   * Cancelled bookings are excluded; commission is summed from each booking's
+   * own `platformFeeVND` rather than re-derived from a 15% rule, so a booking
+   * taken under different terms still reports what it really was.
+   *
+   * It is commission DUE, not collected. The platform processes no payment, so
+   * this figure was renamed off "escrow fee" — the previous label described
+   * money the project had never touched.
+   */
+  const { totalGmvVND, commissionDueVND, activeHostsCount, hostTotal, travellerCount, liveTrips } =
+    useMemo(() => {
+      const billable = bookings.filter((b) => b.status !== 'cancelled');
+      const hosts = users.filter((u) => u.role === 'host');
+      return {
+        totalGmvVND: billable.reduce((sum, b) => sum + (b.totalPriceVND || 0), 0),
+        commissionDueVND: billable.reduce((sum, b) => sum + (b.platformFeeVND || 0), 0),
+        activeHostsCount: hosts.filter((u) => u.verified).length,
+        hostTotal: hosts.length,
+        travellerCount: users.filter((u) => u.role === 'customer').length,
+        liveTrips: bookings.filter((b) => b.status === 'confirmed'),
+      };
+    }, [bookings, users]);
+  const liveBookingsCount = liveTrips.length;
+  const pendingKycCount = kycApplications.filter((k) => k.status === 'pending').length;
 
   const handleApprove = (id: string) => {
     onApproveKyc(id);
@@ -59,7 +161,7 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/20 text-red-300 text-xs font-bold mb-2 border border-red-500/30">
               <i className="fa-solid fa-shield-halved text-xs"></i>
-              <span>{language === 'vi' ? 'Hệ Thống Kiểm Soát An Toàn 24/7' : 'Platform Trust & Safety Admin'}</span>
+              <span>{language === 'vi' ? 'Bảng điều khiển quản trị' : 'Platform Trust & Safety Admin'}</span>
             </div>
             <h2 className="font-serif text-xl sm:text-3xl font-bold tracking-tight">
               {t.adminTitle}
@@ -69,10 +171,28 @@ export const AdminHub: React.FC<AdminHubProps> = ({
             </p>
           </div>
 
+          {/* "All Services Operational" was a green light wired to nothing —
+              no health check exists, so it would have stayed green through a
+              total outage. What an operator can actually use is the size of
+              their queue. */}
           <div className="flex items-center gap-2">
-            <span className="px-3 py-1.5 bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-bold rounded-xl flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-              <span>All Services Operational</span>
+            <span
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 border ${
+                pendingKycCount > 0
+                  ? 'bg-amber-500/20 border-amber-400/40 text-amber-200'
+                  : 'bg-white/5 border-white/15 text-stone-300'
+              }`}
+            >
+              <i className="fa-solid fa-inbox text-[11px]"></i>
+              <span>
+                {pendingKycCount > 0
+                  ? language === 'vi'
+                    ? `${pendingKycCount} hồ sơ xác minh chờ duyệt`
+                    : `${pendingKycCount} verification request${pendingKycCount === 1 ? '' : 's'} waiting`
+                  : language === 'vi'
+                    ? 'Không có hồ sơ nào chờ duyệt'
+                    : 'No applications waiting'}
+              </span>
             </span>
           </div>
         </div>
@@ -87,26 +207,55 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           </div>
 
           <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.escrowRevenue}</span>
+            <span className="text-[10px] text-stone-400 uppercase font-semibold block">
+              {language === 'vi' ? 'Hoa hồng host phải trả' : 'Commission owed by hosts'}
+            </span>
             <span className="text-lg sm:text-xl font-extrabold text-emerald-400">
-              {currency === 'USD' ? `$${Math.round(escrowFeeVND / 25000)}` : `${escrowFeeVND.toLocaleString('vi-VN')}₫`}
+              {currency === 'USD'
+                ? `$${Math.round(commissionDueVND / 25000)}`
+                : `${commissionDueVND.toLocaleString('vi-VN')}₫`}
             </span>
           </div>
 
           <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
             <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.totalHosts}</span>
-            <span className="text-lg sm:text-xl font-extrabold text-white">{activeHostsCount} verified</span>
+            <span className="text-lg sm:text-xl font-extrabold text-white">
+              {activeHostsCount}
+              <span className="text-sm text-stone-400 font-bold"> / {hostTotal}</span>
+            </span>
+            <span className="text-[10px] text-stone-500 block mt-0.5">
+              {language === 'vi' ? 'đã xác minh' : 'verified'}
+            </span>
           </div>
 
+          {/* Was "Safety score: 100% Escrow Protected" — a score with no formula
+              behind it, for an escrow account that does not exist. */}
           <div className="bg-black/30 p-4 rounded-2xl border border-white/10">
-            <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.safetyScore}</span>
-            <span className="text-lg sm:text-xl font-extrabold text-emerald-300">100% Escrow Protected</span>
+            <span className="text-[10px] text-stone-400 uppercase font-semibold block">
+              {language === 'vi' ? 'Người dùng' : 'Accounts'}
+            </span>
+            <span className="text-lg sm:text-xl font-extrabold text-white">{users.length}</span>
+            <span className="text-[10px] text-stone-500 block mt-0.5">
+              {language === 'vi'
+                ? `${travellerCount} khách • ${hostTotal} host • ${admins.length} admin`
+                : `${travellerCount} travellers • ${hostTotal} hosts • ${admins.length} admins`}
+            </span>
           </div>
         </div>
       </div>
 
       {/* Tabs */}
       <div className="flex items-center gap-2 border-b border-stone-200 pb-2">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+            activeTab === 'dashboard' ? 'bg-[#A82323] text-white shadow-xs' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+          }`}
+        >
+          <i className="fa-solid fa-chart-column mr-1.5"></i>
+          {language === 'vi' ? 'Tổng quan' : 'Dashboard'}
+        </button>
+
         <button
           onClick={() => setActiveTab('kyc')}
           className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
@@ -128,6 +277,16 @@ export const AdminHub: React.FC<AdminHubProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('videos')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+            activeTab === 'videos' ? 'bg-[#A82323] text-white shadow-xs' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+          }`}
+        >
+          <i className="fa-brands fa-youtube mr-1.5"></i>
+          {language === 'vi' ? 'Video địa phương' : 'Local videos'} ({localVideos.length})
+        </button>
+
+        <button
           onClick={() => setActiveTab('safety')}
           className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
             activeTab === 'safety' ? 'bg-[#A82323] text-white shadow-xs' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
@@ -136,9 +295,30 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           <i className="fa-solid fa-tower-broadcast mr-1.5"></i>
           {language === 'vi' ? 'Chuyến đi trực tiếp' : 'Active Live Trips'} ({liveBookingsCount})
         </button>
+
+        <button
+          onClick={() => setActiveTab('team')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+            activeTab === 'team' ? 'bg-[#A82323] text-white shadow-xs' : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+          }`}
+        >
+          <i className="fa-solid fa-user-shield mr-1.5"></i>
+          {language === 'vi' ? 'Quyền quản trị' : 'Administrators'} ({admins.length})
+        </button>
       </div>
 
-      {/* TAB 1: HOST eKYC IDENTITY VERIFICATION CENTER */}
+      {/* TAB 0: THE NUMBERS */}
+      {activeTab === 'dashboard' && (
+        <AdminDashboard
+          tours={tours}
+          bookings={bookings}
+          users={users}
+          language={language}
+          currency={currency}
+        />
+      )}
+
+      {/* TAB 1: HOST IDENTITY VERIFICATION CENTER */}
       {activeTab === 'kyc' && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
@@ -163,7 +343,7 @@ export const AdminHub: React.FC<AdminHubProps> = ({
                     }`}
                   >
                     <div className="flex items-center justify-between">
-                      <h4 className="font-bold text-xs text-stone-900">{app.hostName}</h4>
+                      <h4 className="font-bold text-xs text-stone-900">{app.fullName}</h4>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                           app.status === 'approved'
@@ -176,12 +356,15 @@ export const AdminHub: React.FC<AdminHubProps> = ({
                         {app.status.toUpperCase()}
                       </span>
                     </div>
-                    <p className="text-[11px] text-stone-500 mt-0.5">{app.city} • {app.submittedDate}</p>
-                    <div className="flex items-center gap-2 mt-2 text-[10px] font-medium text-stone-600">
-                      <span>AI Match: <strong className="text-emerald-700">{app.identityMatchScore}%</strong></span>
-                      <span>•</span>
-                      <span>Record: <strong>{app.criminalRecordStatus.toUpperCase()}</strong></span>
-                    </div>
+                    {/* This row used to read "AI Match: 98.4% • Record: CLEAN"
+                        for every application. Nothing measured either one —
+                        both were constants in the fixtures, and a reviewer who
+                        trusts a made-up score is worse off than one shown
+                        nothing at all. */}
+                    <p className="text-[11px] text-stone-500 mt-0.5 font-mono tracking-wide">
+                      {formatCccd(app.cccdNumber)}
+                    </p>
+                    <p className="text-[11px] text-stone-400 mt-0.5">{app.submittedDate}</p>
                   </div>
                 );
               })}
@@ -192,66 +375,64 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           {selectedKyc && (
             <div className="lg:col-span-7 bg-white rounded-3xl p-6 border border-stone-200 shadow-xs space-y-5">
               
-              <div className="flex items-center justify-between pb-3 border-b border-stone-200">
-                <div>
-                  <h3 className="font-serif font-bold text-base text-stone-900">
-                    {selectedKyc.hostName}
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-stone-200">
+                <div className="min-w-0">
+                  <h3 className="font-serif font-bold text-base text-stone-900 truncate">
+                    {selectedKyc.fullName}
                   </h3>
                   <p className="text-xs text-stone-500">
-                    {selectedKyc.hostEmail} • {selectedKyc.hostPhone} • {selectedKyc.city}
+                    {language === 'vi' ? 'Gửi ngày' : 'Submitted'} {selectedKyc.submittedDate}
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.aiMatchScore}</span>
-                  <span className="text-base font-black text-emerald-600">
-                    {selectedKyc.identityMatchScore}% MATCH
-                  </span>
-                </div>
+                <span
+                  className={`text-[10px] font-bold px-2 py-1 rounded shrink-0 ${
+                    selectedKyc.status === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : selectedKyc.status === 'rejected'
+                      ? 'bg-rose-100 text-rose-800'
+                      : 'bg-amber-100 text-amber-800'
+                  }`}
+                >
+                  {selectedKyc.status.toUpperCase()}
+                </span>
               </div>
 
-              {/* Side-by-Side Document Previews */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-stone-800 uppercase tracking-wider block">
-                  {t.idCardPreview}
-                </label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="bg-stone-100 rounded-xl p-2 border border-stone-200 text-center">
-                    <span className="text-[10px] text-stone-500 font-semibold block mb-1">Mặt Trước (Front)</span>
-                    <img
-                      src={selectedKyc.idCardFront}
-                      alt="ID Front"
-                      className="w-full h-32 object-cover rounded-lg"
-                    />
-                  </div>
-                  <div className="bg-stone-100 rounded-xl p-2 border border-stone-200 text-center">
-                    <span className="text-[10px] text-stone-500 font-semibold block mb-1">Mặt Sau (Back)</span>
-                    <img
-                      src={selectedKyc.idCardBack}
-                      alt="ID Back"
-                      className="w-full h-32 object-cover rounded-lg"
-                    />
-                  </div>
-                </div>
-              </div>
+              {/* What the host typed, and nothing else.
+                  The two ID-card photographs that used to sit here are gone on
+                  purpose: from 1 January 2026 Nghị định 356/2025/NĐ-CP treats a
+                  picture of a citizen ID card as sensitive personal data, and
+                  Firestore is hosted outside Vietnam. Not holding the image is
+                  the cheapest compliance available, and a reviewer can be shown
+                  the card out of band if they need to see it. */}
+              <dl className="space-y-3 text-sm">
+                <KycRow
+                  label={language === 'vi' ? 'Họ và tên' : 'Full name'}
+                  value={selectedKyc.fullName}
+                />
+                <KycRow
+                  label={language === 'vi' ? 'Số căn cước' : 'Citizen ID'}
+                  value={formatCccd(selectedKyc.cccdNumber)}
+                  mono
+                />
+                <KycRow
+                  label={language === 'vi' ? 'Ngày sinh' : 'Date of birth'}
+                  value={selectedKyc.dateOfBirth}
+                />
+                <KycRow
+                  label={language === 'vi' ? 'Quốc tịch' : 'Nationality'}
+                  value={selectedKyc.nationality}
+                />
+                <KycRow
+                  label={language === 'vi' ? 'Địa chỉ thường trú' : 'Permanent address'}
+                  value={selectedKyc.address}
+                />
+              </dl>
 
-              {/* Verified Checks List */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-emerald-900">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <i className="fa-solid fa-shield-check text-emerald-600"></i>
-                    <span>{t.criminalBackground}</span>
-                  </div>
-                  <span className="text-[11px] block mt-0.5 font-mono">{t.cleanRecord}</span>
-                </div>
-
-                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-amber-900">
-                  <div className="font-bold flex items-center gap-1.5">
-                    <i className="fa-solid fa-certificate text-amber-600"></i>
-                    <span>Certifications & Languages</span>
-                  </div>
-                  <span className="text-[11px] block mt-0.5">{selectedKyc.languageCert}</span>
-                </div>
-              </div>
+              <p className="text-[11px] text-stone-500 bg-stone-50 border border-stone-200 rounded-xl p-3 leading-relaxed">
+                {language === 'vi'
+                  ? 'Đây là thông tin host tự khai. ViS-Go không đối chiếu với Cơ sở dữ liệu quốc gia về dân cư — duyệt nghĩa là bạn đã đọc và chịu trách nhiệm.'
+                  : 'These are details the host declared. ViS-Go does not check them against the national population database — approving means you read them and take responsibility.'}
+              </p>
 
               {/* Action Buttons: Approve / Reject */}
               <div className="pt-3 border-t border-stone-200 flex gap-3">
@@ -277,6 +458,15 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           )}
 
         </div>
+      )}
+
+      {activeTab === 'videos' && (
+        <LocalVideoManager
+          videos={localVideos}
+          language={language}
+          onSave={onSaveLocalVideos}
+          onDelete={onDeleteLocalVideo}
+        />
       )}
 
       {/* TAB 2: TOURS CATALOG MODERATION */}
@@ -322,29 +512,184 @@ export const AdminHub: React.FC<AdminHubProps> = ({
       {/* TAB 3: SAFETY DISPATCH & ACTIVE TRIPS */}
       {activeTab === 'safety' && (
         <div className="bg-white rounded-3xl border border-stone-200 p-6 shadow-xs space-y-4">
-          <h3 className="font-serif font-bold text-base text-stone-900">Active Live Trips & Escrow Protection</h3>
+          <h3 className="font-serif font-bold text-base text-stone-900">
+            {language === 'vi' ? 'Chuyến đi đang diễn ra' : 'Active live trips'}
+          </h3>
           <p className="text-xs text-stone-500">
             Real-time telemetry tracking active host & customer pairings across Vietnam.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-emerald-900">Trip #VIS-8492 (Hà Nội)</span>
-                <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded text-[10px] font-bold">ACTIVE GPS TRACKING</span>
-              </div>
-              <p className="text-xs text-stone-700"><strong>Host:</strong> Tommy (0912 345 678) ↔ <strong>Guest:</strong> Sarah Jenkins</p>
-              <p className="text-[11px] text-stone-500">Meeting Point: Hanoi Opera House • Status: Normal Pace</p>
+          {liveTrips.length === 0 ? (
+            <div className="p-6 bg-stone-50 rounded-2xl border border-stone-200 text-center">
+              <i className="fa-solid fa-satellite-dish text-stone-300 text-2xl mb-2"></i>
+              <p className="text-xs text-stone-500">
+                {language === 'vi'
+                  ? 'Hiện không có chuyến đi nào đang diễn ra.'
+                  : 'No trips are currently in progress.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {liveTrips.map((trip) => (
+                <div key={trip.id} className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-xs text-emerald-900 truncate">
+                      Trip #{trip.id} ({trip.city})
+                    </span>
+                    <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded text-[10px] font-bold shrink-0">
+                      ACTIVE GPS TRACKING
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-700">
+                    <strong>Host:</strong> {trip.hostName} ↔ <strong>Guest:</strong> {trip.customerName}
+                  </p>
+                  <p className="text-[11px] text-stone-500">
+                    {language === 'vi' ? 'Điểm hẹn' : 'Meeting Point'}: {trip.meetingPoint} • {trip.bookingDate} {trip.bookingTime}
+                  </p>
+                  <button
+                    onClick={() => {
+                      sounds.playTap();
+                      onOpenConversation(trip);
+                    }}
+                    className="w-full mt-1 px-3 py-1.5 bg-white hover:bg-stone-50 border border-emerald-300 text-emerald-900 rounded-xl text-[11px] font-bold transition-colors cursor-pointer"
+                  >
+                    <i className="fa-regular fa-comments mr-1.5"></i>
+                    {language === 'vi' ? 'Xem hội thoại' : 'Read conversation'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 4: WHO IS AN ADMINISTRATOR */}
+      {activeTab === 'team' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+          {/* Current administrators */}
+          <div className="lg:col-span-5 bg-white rounded-3xl border border-stone-200 p-5 shadow-xs space-y-3">
+            <h3 className="font-serif font-bold text-base text-stone-900">
+              {language === 'vi' ? 'Quản trị viên hiện tại' : 'Current administrators'}
+            </h3>
+            <p className="text-xs text-stone-500 leading-relaxed">
+              {language === 'vi'
+                ? 'Không ai tự đăng ký thành quản trị viên được. Trang đăng ký chỉ có hai vai trò — khách và host — và quy tắc bảo mật của Firestore từ chối mọi hồ sơ tạo mới với vai trò admin. Quyền này chỉ có thể do một quản trị viên đang có cấp cho người khác.'
+                : 'Nobody can register as an administrator. Sign-up offers two roles — traveller and host — and the Firestore rules refuse any profile created with the admin role. The only way in is an existing administrator granting it.'}
+            </p>
+
+            <div className="space-y-2 pt-1">
+              {admins.map((a) => {
+                const isSelf = a.id === activeUser?.id;
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 p-3 bg-stone-50 rounded-2xl border border-stone-200"
+                  >
+                    <Avatar src={a.avatar} name={a.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-stone-900 truncate">{a.name}</p>
+                      <p className="text-[11px] text-stone-500 truncate">{a.email}</p>
+                    </div>
+                    {isSelf ? (
+                      <span className="px-2 py-1 rounded-lg bg-stone-200 text-stone-600 text-[10px] font-bold shrink-0">
+                        {language === 'vi' ? 'BẠN' : 'YOU'}
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          sounds.playNotificationPing();
+                          onSetUserRole(a, 'customer');
+                        }}
+                        className="px-2.5 py-1 rounded-lg border border-stone-300 bg-white hover:bg-red-50 hover:border-red-300 hover:text-red-700 text-stone-700 text-[11px] font-bold shrink-0 cursor-pointer transition-colors"
+                      >
+                        {language === 'vi' ? 'Thu hồi' : 'Revoke'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs text-emerald-900">Trip #VIS-7310 (TP. Hồ Chí Minh)</span>
-                <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded text-[10px] font-bold">ACTIVE GPS TRACKING</span>
-              </div>
-              <p className="text-xs text-stone-700"><strong>Host:</strong> Mai Linh (0933 456 789) ↔ <strong>Guest:</strong> Sarah Jenkins</p>
-              <p className="text-[11px] text-stone-500">Meeting Point: Cha Tam Church • Status: Normal Pace</p>
+            {/* An admin who demotes themselves cannot undo it — the button that
+                would undo it is on a page they can no longer open. So that one
+                case is a label, not a button, above. */}
+            <p className="text-[11px] text-stone-400 pt-1">
+              {language === 'vi'
+                ? 'Bạn không thể tự thu hồi quyền của chính mình: sau khi thu hồi, trang này sẽ không mở được nữa để hoàn tác.'
+                : 'You cannot revoke your own access: once revoked, this page is no longer reachable to undo it.'}
+            </p>
+          </div>
+
+          {/* Grant */}
+          <div className="lg:col-span-7 bg-white rounded-3xl border border-stone-200 p-5 shadow-xs space-y-3">
+            <h3 className="font-serif font-bold text-base text-stone-900">
+              {language === 'vi' ? 'Cấp quyền quản trị' : 'Grant administrator access'}
+            </h3>
+
+            <div className="relative">
+              <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-stone-400 text-xs"></i>
+              <input
+                type="text"
+                value={memberQuery}
+                onChange={(e) => setMemberQuery(e.target.value)}
+                placeholder={
+                  language === 'vi'
+                    ? 'Tìm theo tên hoặc email tài khoản đã đăng ký…'
+                    : 'Search a registered account by name or email…'
+                }
+                className="w-full pl-9 pr-3.5 py-2.5 bg-stone-50 focus:bg-white border border-stone-200 focus:border-[#A82323] focus:ring-1 focus:ring-[#A82323] rounded-xl text-xs text-stone-900 outline-hidden transition-all"
+              />
             </div>
+
+            {memberQuery.trim().length < 2 ? (
+              <div className="p-6 bg-stone-50 rounded-2xl border border-stone-200 text-center">
+                <i className="fa-solid fa-user-shield text-stone-300 text-2xl mb-2"></i>
+                <p className="text-xs text-stone-500">
+                  {language === 'vi'
+                    ? 'Nhập ít nhất 2 ký tự để tìm tài khoản.'
+                    : 'Type at least 2 characters to find an account.'}
+                </p>
+              </div>
+            ) : memberMatches.length === 0 ? (
+              <div className="p-6 bg-stone-50 rounded-2xl border border-stone-200 text-center">
+                <p className="text-xs text-stone-500">
+                  {language === 'vi'
+                    ? 'Không có tài khoản nào khớp. Người đó phải tự đăng ký trước rồi mới cấp quyền được.'
+                    : 'No account matches. They must register themselves before they can be granted access.'}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {memberMatches.map((u) => (
+                  <div key={u.id} className="flex items-center gap-3 p-3 bg-stone-50 rounded-2xl border border-stone-200">
+                    <Avatar src={u.avatar} name={u.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-stone-900 truncate">{u.name}</p>
+                      <p className="text-[11px] text-stone-500 truncate">
+                        {u.email} • {u.role === 'host' ? (language === 'vi' ? 'Host' : 'Host') : (language === 'vi' ? 'Khách' : 'Traveller')}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        const ok = window.confirm(
+                          language === 'vi'
+                            ? `Cấp quyền quản trị cho ${u.name} (${u.email})?\n\nQuản trị viên đọc được mọi hội thoại, mọi đơn đặt và mọi giấy tờ xác minh, và có thể cấp quyền này cho người khác.`
+                            : `Grant administrator access to ${u.name} (${u.email})?\n\nAdministrators can read every conversation, booking and verification document, and can grant this access to others.`,
+                        );
+                        if (!ok) return;
+                        sounds.playSuccessChime();
+                        onSetUserRole(u, 'admin');
+                        setMemberQuery('');
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-[#A82323] hover:bg-[#8C1818] text-white text-[11px] font-bold shrink-0 cursor-pointer transition-colors"
+                    >
+                      {language === 'vi' ? 'Cấp quyền admin' : 'Make admin'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -352,3 +697,11 @@ export const AdminHub: React.FC<AdminHubProps> = ({
     </div>
   );
 };
+
+/** One declared field in the review panel. */
+const KycRow: React.FC<{ label: string; value: string; mono?: boolean }> = ({ label, value, mono }) => (
+  <div className="flex flex-col sm:flex-row sm:items-baseline gap-0.5 sm:gap-3">
+    <dt className="text-[11px] font-bold text-stone-500 uppercase tracking-wider sm:w-40 shrink-0">{label}</dt>
+    <dd className={`text-stone-900 break-words ${mono ? 'font-mono tracking-widest' : ''}`}>{value}</dd>
+  </div>
+);

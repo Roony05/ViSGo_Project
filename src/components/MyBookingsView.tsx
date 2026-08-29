@@ -1,8 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Booking, Language, Tour } from '../types';
 import { translations } from '../i18n/translations';
 import { generateBookingInvoicePDF } from '../utils/pdfGenerator';
-import { createGoogleCalendarUrl } from '../utils/calendar';
+import { createGoogleCalendarUrl, addBookingToCalendar, resolveDurationHours } from '../utils/calendar';
+import { sendBookingEmail } from '../utils/googleGmail';
+import { buildGoogleMapsPlaceUrl } from '../utils/googleMaps';
+import { HAS_GOOGLE_OAUTH } from '../config/env';
 
 interface MyBookingsViewProps {
   bookings: Booking[];
@@ -10,6 +13,14 @@ interface MyBookingsViewProps {
   language: Language;
   currency: 'VND' | 'USD';
   onOpenLiveRadar: (booking: Booking) => void;
+  /**
+   * Opens the conversation for one specific trip.
+   *
+   * Per booking, not per user: a traveller with two trips has two separate
+   * conversations, with two different hosts. The global "Messages" button can
+   * only ever guess which one they meant.
+   */
+  onOpenChat: (booking: Booking) => void;
   onOpenReview: (tour: Tour) => void;
   onExploreMore: () => void;
 }
@@ -20,13 +31,42 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
   language,
   currency,
   onOpenLiveRadar,
+  onOpenChat,
   onOpenReview,
   onExploreMore,
 }) => {
   const t = translations[language];
 
+  // Per-booking async state, so one card's spinner never affects another.
+  const [busyAction, setBusyAction] = useState<Record<string, 'calendar' | 'email' | undefined>>({});
+  const [doneAction, setDoneAction] = useState<Record<string, 'calendar' | 'email' | undefined>>({});
+
   const handleDownloadInvoice = (booking: Booking) => {
     generateBookingInvoicePDF(booking, language);
+  };
+
+  const handleAddToCalendar = async (e: React.MouseEvent<HTMLAnchorElement>, booking: Booking) => {
+    // Without OAuth the plain href already opens the Calendar template.
+    if (!HAS_GOOGLE_OAUTH) return;
+
+    e.preventDefault();
+    setBusyAction((prev) => ({ ...prev, [booking.id]: 'calendar' }));
+
+    const result = await addBookingToCalendar(booking, language, resolveDurationHours(booking, tours));
+
+    setBusyAction((prev) => ({ ...prev, [booking.id]: undefined }));
+    if (result.mode === 'created') {
+      setDoneAction((prev) => ({ ...prev, [booking.id]: 'calendar' }));
+    }
+  };
+
+  const handleEmailItinerary = async (booking: Booking) => {
+    setBusyAction((prev) => ({ ...prev, [booking.id]: 'email' }));
+    const result = await sendBookingEmail(booking, language);
+    setBusyAction((prev) => ({ ...prev, [booking.id]: undefined }));
+    if (result.mode === 'sent') {
+      setDoneAction((prev) => ({ ...prev, [booking.id]: 'email' }));
+    }
   };
 
   return (
@@ -71,7 +111,10 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {bookings.map((booking) => {
             const matchedTour = tours.find(t => t.id === booking.tourId);
-            const calendarUrl = createGoogleCalendarUrl(booking);
+            const calendarUrl = createGoogleCalendarUrl(booking, language, resolveDurationHours(booking, tours));
+            const mapUrl = buildGoogleMapsPlaceUrl(booking.meetingPoint, booking.city);
+            const busy = busyAction[booking.id];
+            const done = doneAction[booking.id];
 
             return (
               <div
@@ -130,12 +173,24 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Meeting Location */}
-                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-700">
-                    <span className="font-bold text-[10px] text-stone-500 uppercase block mb-0.5">
-                      {t.meetingLocation}
-                    </span>
-                    <p className="line-clamp-1">{booking.meetingPoint}</p>
+                  {/* Meeting Location + live Google Maps directions */}
+                  <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-xs text-stone-700 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="font-bold text-[10px] text-stone-500 uppercase block mb-0.5">
+                        {t.meetingLocation}
+                      </span>
+                      <p className="line-clamp-1">{booking.meetingPoint}</p>
+                    </div>
+                    <a
+                      href={mapUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 px-2.5 py-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold flex items-center gap-1.5 cursor-pointer"
+                      title={language === 'vi' ? 'Mở chỉ đường trên Google Maps' : 'Open directions in Google Maps'}
+                    >
+                      <i className="fa-solid fa-diamond-turn-right"></i>
+                      <span className="hidden sm:inline">{language === 'vi' ? 'Chỉ đường' : 'Directions'}</span>
+                    </a>
                   </div>
                 </div>
 
@@ -152,17 +207,41 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                       <span>PDF</span>
                     </button>
 
-                    {/* Google Calendar Link */}
+                    {/* Google Calendar */}
                     <a
                       href={calendarUrl}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={(e) => handleAddToCalendar(e, booking)}
                       className="px-3 py-1.5 bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                      title="Add to Google Calendar"
+                      title={language === 'vi' ? 'Thêm vào Google Calendar' : 'Add to Google Calendar'}
                     >
-                      <i className="fa-regular fa-calendar-plus text-blue-600"></i>
+                      {busy === 'calendar' ? (
+                        <i className="fa-solid fa-spinner fa-spin text-blue-600"></i>
+                      ) : done === 'calendar' ? (
+                        <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                      ) : (
+                        <i className="fa-regular fa-calendar-plus text-blue-600"></i>
+                      )}
                       <span className="hidden sm:inline">Calendar</span>
                     </a>
+
+                    {/* Email the itinerary */}
+                    <button
+                      onClick={() => handleEmailItinerary(booking)}
+                      disabled={busy === 'email'}
+                      className="px-3 py-1.5 bg-white hover:bg-stone-100 disabled:opacity-60 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      title={language === 'vi' ? 'Gửi lịch trình qua Gmail' : 'Email this itinerary via Gmail'}
+                    >
+                      {busy === 'email' ? (
+                        <i className="fa-solid fa-spinner fa-spin text-red-600"></i>
+                      ) : done === 'email' ? (
+                        <i className="fa-solid fa-circle-check text-emerald-600"></i>
+                      ) : (
+                        <i className="fa-regular fa-envelope text-red-600"></i>
+                      )}
+                      <span className="hidden sm:inline">Gmail</span>
+                    </button>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -175,6 +254,14 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                         {t.reviewTrip}
                       </button>
                     )}
+
+                    <button
+                      onClick={() => onOpenChat(booking)}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold cursor-pointer flex items-center gap-1.5"
+                    >
+                      <i className="fa-regular fa-comment-dots text-stone-600"></i>
+                      <span>{language === 'vi' ? 'Nhắn tin' : 'Message'}</span>
+                    </button>
 
                     <button
                       onClick={() => onOpenLiveRadar(booking)}

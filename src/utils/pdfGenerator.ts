@@ -60,7 +60,14 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
 
   ctx.textAlign = 'left';
 
-  // Status Banner (Escrow Protected)
+  // Status banner.
+  //
+  // This voucher used to be a payment receipt: "PAYMENT STATUS: CONFIRMED &
+  // PROTECTED VIA VIS-GO ESCROW", a line item for an escrow fee, and a gold
+  // "ESCROW VERIFIED / SECURE PAYMENT" stamp. No payment was ever taken, and
+  // escrow is a licensed activity this platform does not perform — so the
+  // document now says what it is: a booking confirmation, with the amount the
+  // traveller owes their host in person.
   ctx.fillStyle = '#F3F4F6';
   ctx.beginPath();
   ctx.roundRect(100, 280, width - 200, 150, 16);
@@ -68,14 +75,12 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
 
   ctx.fillStyle = '#374151';
   ctx.font = 'bold 24px "Be Vietnam Pro", sans-serif';
-  ctx.fillText(isVi ? 'TRẠNG THÁI GIAO DỊCH:' : 'PAYMENT STATUS:', 140, 345);
+  ctx.fillText(isVi ? 'TRẠNG THÁI ĐẶT CHỖ:' : 'BOOKING STATUS:', 140, 345);
 
   ctx.fillStyle = '#059669'; // Emerald
   ctx.font = 'bold 26px "Be Vietnam Pro", sans-serif';
   ctx.fillText(
-    isVi
-      ? '✓ ĐÃ XÁC NHẬN & BẢO ĐẢM KÝ QUỸ (VIS-GO ESCROW SAFE)'
-      : '✓ CONFIRMED & PROTECTED VIA VIS-GO ESCROW',
+    isVi ? '✓ HOST ĐÃ XÁC NHẬN' : '✓ CONFIRMED BY YOUR HOST',
     520,
     345
   );
@@ -83,9 +88,13 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.fillStyle = '#6B7280';
   ctx.font = '400 22px "Be Vietnam Pro", sans-serif';
   ctx.fillText(
-    `${isVi ? 'Ngày thanh toán' : 'Issued Date'}: ${booking.createdAt}  |  ${
-      isVi ? 'Hình thức' : 'Method'
-    }: ${booking.paymentMethod.toUpperCase()}  |  ${isVi ? 'Hỗ trợ khẩn cấp 24/7' : '24/7 Safety Line'}: +84 908 123 456`,
+    // The number that used to sit here — +84 908 123 456 — reaches nobody. A
+    // traveller in trouble reading it off a voucher is worse off than one who
+    // was told where support actually lives, so the voucher points at the SOS
+    // button in the app instead.
+    `${isVi ? 'Ngày đặt' : 'Booked on'}: ${booking.createdAt}  |  ${
+      isVi ? 'Hỗ trợ khẩn cấp: nút SOS trong ứng dụng ViS-Go' : 'Emergency support: SOS button in the ViS-Go app'
+    }`,
     140,
     395
   );
@@ -136,11 +145,15 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.fillText(`${isVi ? 'Họ và tên' : 'Full Name'}:  ${booking.hostName}`, rightCardX + 40, cardY + 115);
   ctx.fillText(`${isVi ? 'Số điện thoại / Zalo' : 'Phone / WhatsApp'}:  ${booking.hostPhone}`, rightCardX + 40, cardY + 165);
   ctx.fillText(`${isVi ? 'Thành phố' : 'Base City'}:  ${booking.city}`, rightCardX + 40, cardY + 215);
-  ctx.fillText(
-    `${isVi ? 'Trạng thái định danh' : 'Identity Status'}:  100% eKYC Verified Buddy`,
-    rightCardX + 40,
-    cardY + 265
-  );
+  /*
+    The line that used to sit here printed "Identity Status: 100% Verified
+    Buddy" on every voucher, for every host, unconditionally. A Booking carries
+    no `hostVerified` field — only a Tour does — so there was nothing behind the
+    claim, and a voucher is exactly where a traveller would take one seriously.
+    Rather than print a guess on a document, it prints nothing: the verified
+    badge appears on the host's profile and on the tour page, where it is read
+    from real data.
+  */
 
   // Tour Details & Schedule Box (Warm Rose tint)
   const tourBoxY = 820;
@@ -217,19 +230,18 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.textAlign = 'right';
   ctx.fillText(`${booking.totalPriceVND.toLocaleString('vi-VN')} VND`, width - 140, itemY);
 
-  // Line item 2: Safety & Escrow service fee
+  // Line item 2: how it is settled. Not a charge — the line it replaces
+  // billed the traveller for an escrow service that never existed.
   itemY += 60;
   ctx.textAlign = 'left';
   ctx.fillText(
-    isVi ? 'Phí bảo hiểm du lịch & Ký quỹ an toàn ViS-Go 24/7' : 'Traveler Safety Insurance & 24/7 Support Escrow',
+    isVi ? 'Hình thức: trả trực tiếp cho host khi gặp mặt' : 'Settlement: paid directly to your host when you meet',
     140,
     itemY
   );
-  ctx.textAlign = 'center';
-  ctx.fillText('1x', width / 2 + 100, itemY);
   ctx.textAlign = 'right';
   ctx.fillStyle = '#059669';
-  ctx.fillText(isVi ? 'ĐÃ BAO GỒM' : 'INCLUDED', width - 140, itemY);
+  ctx.fillText(isVi ? 'CHƯA THU' : 'NOT CHARGED', width - 140, itemY);
 
   // Total divider
   itemY += 40;
@@ -268,21 +280,21 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.textAlign = 'left';
   ctx.fillStyle = '#B45309';
   ctx.font = 'bold 24px "Be Vietnam Pro", sans-serif';
-  ctx.fillText('🛡️ ViS-Go Verified Security Guarantee (100% Escrow Protection)', 140, footerY + 55);
+  ctx.fillText(isVi ? '🛡️ Lưu ý về thanh toán' : '🛡️ About payment', 140, footerY + 55);
 
   ctx.fillStyle = '#4B5563';
   ctx.font = '400 20px "Be Vietnam Pro", sans-serif';
   ctx.fillText(
     isVi
-      ? 'Hóa đơn này xác thực quyền tham gia trải nghiệm. Khoản thanh toán của bạn được giữ an toàn trong quỹ ký quỹ ViS-Go'
-      : 'This receipt confirms your tour participation. Your payment is held securely in the ViS-Go Escrow Vault',
+      ? 'Phiếu này xác nhận chỗ của bạn trong trải nghiệm. ViS-Go KHÔNG thu tiền và KHÔNG giữ tiền hộ —'
+      : 'This voucher confirms your place on the experience. ViS-Go does NOT take or hold your money —',
     140,
     footerY + 105
   );
   ctx.fillText(
     isVi
-      ? 'và chỉ giải ngân cho Host sau khi chuyến đi hoàn tất tốt đẹp. Hỗ trợ khẩn cấp 24/7: +84 908 123 456.'
-      : 'and is only released to your host upon successful journey completion. 24/7 Support Hotline: +84 908 123 456.',
+      ? 'bạn thanh toán trực tiếp cho host khi gặp mặt. Cần hỗ trợ khẩn cấp: bấm nút SOS trong ứng dụng ViS-Go.'
+      : 'you settle directly with your host in person. Need urgent help: use the SOS button in the ViS-Go app.',
     140,
     footerY + 145
   );
@@ -297,9 +309,9 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.font = 'bold 20px "Be Vietnam Pro", sans-serif';
   ctx.fillText('VIS-GO VIETNAM', width - 280, footerY + 75);
   ctx.font = 'bold 22px "Be Vietnam Pro", sans-serif';
-  ctx.fillText('ESCROW VERIFIED', width - 280, footerY + 110);
+  ctx.fillText(isVi ? 'ĐÃ XÁC NHẬN' : 'CONFIRMED', width - 280, footerY + 110);
   ctx.font = '500 16px "Be Vietnam Pro", sans-serif';
-  ctx.fillText('SECURE PAYMENT', width - 280, footerY + 145);
+  ctx.fillText(isVi ? 'BỞI HOST' : 'BY YOUR HOST', width - 280, footerY + 145);
 
   // Bottom Copyright
   ctx.fillStyle = '#9CA3AF';

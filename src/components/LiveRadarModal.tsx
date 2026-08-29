@@ -1,8 +1,22 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import L from 'leaflet';
 import { Booking, Language, User } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { RadarMap, type RadarMapHandle } from './RadarMap';
+import { LocationConsentGate } from './LocationConsentGate';
+import { StopSharingDialog } from './StopSharingDialog';
+import {
+  grantSharing,
+  shareVerdict,
+  formatRemaining,
+  type ShareVerdict,
+} from '../utils/locationSharing';
+import {
+  buildGoogleMapsDirectionsUrl,
+  buildGoogleMapsCoordUrl,
+  haversineKm,
+  formatDistance,
+} from '../utils/googleMaps';
 
 interface LiveRadarModalProps {
   isOpen: boolean;
@@ -34,12 +48,9 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
   const isVi = language === 'vi';
   const t = translations[language];
 
-  const mapContainerRef = useRef<HTMLDivElement | null>(null);
-  const mapInstanceRef = useRef<L.Map | null>(null);
-  const userMarkerRef = useRef<L.Marker | null>(null);
-  const hostMarkerRef = useRef<L.Marker | null>(null);
-  const polylineRef = useRef<L.Polyline | null>(null);
+  const mapRef = useRef<RadarMapHandle | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const [mapBackend, setMapBackend] = useState<'google' | 'leaflet'>('leaflet');
 
   // Coordinates
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number }>({
@@ -53,92 +64,145 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
   });
 
   // GPS Realtime Metadata
-  const [gpsStatus, setGpsStatus] = useState<'acquiring' | 'locked' | 'permission_denied' | 'simulated'>('acquiring');
+  const [gpsStatus, setGpsStatus] = useState<
+    'acquiring' | 'locked' | 'permission_denied' | 'unavailable' | 'timeout' | 'insecure' | 'simulated'
+  >('acquiring');
+  const [gpsError, setGpsError] = useState<string>('');
   const [accuracyMeters, setAccuracyMeters] = useState<number | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string>('');
-  const [isGpsSharing, setIsGpsSharing] = useState<boolean>(true);
+  /**
+   * Whether we may read the device's position, decided by locationSharing.ts.
+   * This used to be a plain `useState(true)`: the radar started tracking the
+   * moment it opened, and the off switch was lost on the next remount.
+   */
+  const [verdict, setVerdict] = useState<ShareVerdict>({ state: 'none' });
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
+  const isGpsSharing = verdict.state === 'active';
   const [distanceKm, setDistanceKm] = useState<string>('0.75');
   const [estimatedMinutes, setEstimatedMinutes] = useState<number>(4);
   const [hostSpeedKmh, setHostSpeedKmh] = useState<number>(24);
   const [sosActive, setSosActive] = useState<boolean>(false);
   const [sosModalOpen, setSosModalOpen] = useState<boolean>(false);
 
-  // Calculate distance between two lat/lng in km
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-    const R = 6371; // Earth radius in km
-    const dLat = (lat2 - lat1) * (Math.PI / 180);
-    const dLon = (lon2 - lon1) * (Math.PI / 180);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
-  };
+  // Great-circle distance in km between two coordinates.
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) =>
+    haversineKm({ lat: lat1, lng: lon1 }, { lat: lat2, lng: lon2 });
 
-  // Continuous Hardware GPS tracking with navigator.geolocation.watchPosition
+  // The grant is re-checked on open and then every 15s while the radar is up,
+  // so an expiry ends tracking on its own without the user doing anything and
+  // without waiting for a remount.
+  useEffect(() => {
+    if (!isOpen) return;
+    const evaluate = () => setVerdict(shareVerdict(booking));
+    evaluate();
+    const id = setInterval(evaluate, 15_000);
+    return () => clearInterval(id);
+  }, [isOpen, booking]);
+
+  // Continuous hardware GPS tracking via navigator.geolocation.watchPosition.
   useEffect(() => {
     if (!isOpen) return;
 
-    if (!isGpsSharing) {
-      if (watchIdRef.current !== null && navigator.geolocation) {
+    const clearWatch = () => {
+      if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
+    };
+
+    if (!isGpsSharing) {
+      clearWatch();
       setGpsStatus('simulated');
+      setGpsError('');
       return;
     }
 
-    if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
-      setGpsStatus('acquiring');
-
-      const successHandler = (pos: GeolocationPosition) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        const acc = Math.round(pos.coords.accuracy || 10);
-        
-        setUserCoords({ lat, lng });
-        setAccuracyMeters(acc);
-        setGpsStatus('locked');
-        setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
-
-        // Move host relative to user if first lock
-        setHostCoords((prev) => {
-          const dist = calculateDistance(lat, lng, prev.lat, prev.lng);
-          if (dist > 5) {
-            // Position buddy 600m away on road
-            return {
-              lat: lat + 0.0035,
-              lng: lng + 0.0032,
-            };
-          }
-          return prev;
-        });
-      };
-
-      const errorHandler = (err: GeolocationPositionError) => {
-        console.warn('Geolocation watch error or permission declined:', err.message);
-        setGpsStatus('permission_denied');
-      };
-
-      const watchId = navigator.geolocation.watchPosition(successHandler, errorHandler, {
-        enableHighAccuracy: true,
-        maximumAge: 2000,
-        timeout: 12000,
-      });
-
-      watchIdRef.current = watchId;
-
-      return () => {
-        if (watchIdRef.current !== null && navigator.geolocation) {
-          navigator.geolocation.clearWatch(watchIdRef.current);
-          watchIdRef.current = null;
-        }
-      };
-    } else {
-      setGpsStatus('simulated');
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setGpsStatus('unavailable');
+      setGpsError(isVi ? 'Trình duyệt không hỗ trợ định vị.' : 'This browser does not support geolocation.');
+      return;
     }
-  }, [isOpen, isGpsSharing]);
+
+    // Browsers silently refuse geolocation on plain http:// (localhost aside),
+    // which used to surface as a generic "permission denied" and send people
+    // hunting through their browser settings for nothing.
+    if (!window.isSecureContext) {
+      setGpsStatus('insecure');
+      setGpsError(
+        isVi
+          ? 'Định vị chỉ hoạt động trên HTTPS hoặc localhost. Hãy mở app qua https:// hoặc http://localhost.'
+          : 'Geolocation only works over HTTPS or on localhost. Open the app via https:// or http://localhost.'
+      );
+      return;
+    }
+
+    setGpsStatus('acquiring');
+    setGpsError('');
+
+    const successHandler = (pos: GeolocationPosition) => {
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy || 10);
+
+      setUserCoords({ lat, lng });
+      setAccuracyMeters(acc);
+      setGpsStatus('locked');
+      setGpsError('');
+      setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+      // On the first real fix, drop the buddy nearby instead of leaving them
+      // stranded at the default Hanoi coordinates.
+      setHostCoords((prev) => {
+        const dist = calculateDistance(lat, lng, prev.lat, prev.lng);
+        if (dist > 5) {
+          return { lat: lat + 0.0035, lng: lng + 0.0032 };
+        }
+        return prev;
+      });
+    };
+
+    const errorHandler = (err: GeolocationPositionError) => {
+      console.warn('[ViS-Go] Geolocation error:', err.code, err.message);
+
+      switch (err.code) {
+        case err.PERMISSION_DENIED:
+          setGpsStatus('permission_denied');
+          setGpsError(
+            isVi
+              ? 'Bạn đã từ chối quyền truy cập vị trí. Bấm vào biểu tượng ổ khóa trên thanh địa chỉ để cấp lại quyền, hoặc chọn một điểm hẹn mẫu bên dưới.'
+              : 'Location access was denied. Use the padlock icon in the address bar to allow it, or pick a sample meeting point below.'
+          );
+          break;
+        case err.POSITION_UNAVAILABLE:
+          setGpsStatus('unavailable');
+          setGpsError(
+            isVi
+              ? 'Không lấy được tín hiệu vệ tinh. Hãy thử ra ngoài trời hoặc bật Wi-Fi để định vị chính xác hơn.'
+              : 'No satellite signal. Try moving outdoors or turning on Wi-Fi to improve positioning.'
+          );
+          break;
+        case err.TIMEOUT:
+          setGpsStatus('timeout');
+          setGpsError(
+            isVi
+              ? 'Hết thời gian chờ định vị. Đang thử lại...'
+              : 'Locating timed out. Retrying...'
+          );
+          break;
+        default:
+          setGpsStatus('unavailable');
+          setGpsError(err.message || (isVi ? 'Lỗi định vị không xác định.' : 'Unknown geolocation error.'));
+      }
+    };
+
+    watchIdRef.current = navigator.geolocation.watchPosition(successHandler, errorHandler, {
+      enableHighAccuracy: true,
+      maximumAge: 2000,
+      timeout: 15000,
+    });
+
+    return clearWatch;
+  }, [isOpen, isGpsSharing, isVi]);
 
   // Real-time host buddy scooter simulation tick (approaching traveler)
   useEffect(() => {
@@ -172,137 +236,41 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
   // Compute live distance and ETA
   useEffect(() => {
     const dist = calculateDistance(userCoords.lat, userCoords.lng, hostCoords.lat, hostCoords.lng);
-    setDistanceKm(dist < 1 ? `${Math.round(dist * 1000)} m` : `${dist.toFixed(2)} km`);
+    setDistanceKm(formatDistance(dist));
     const mins = Math.max(1, Math.round((dist / (hostSpeedKmh || 25)) * 60));
     setEstimatedMinutes(mins);
   }, [userCoords, hostCoords, hostSpeedKmh]);
 
-  // Initialize and update Leaflet Map
-  useEffect(() => {
-    if (!isOpen || !mapContainerRef.current) return;
-
-    if (!mapInstanceRef.current) {
-      const map = L.map(mapContainerRef.current, {
-        center: [userCoords.lat, userCoords.lng],
-        zoom: 15,
-        zoomControl: false,
-      });
-
-      L.control.zoom({ position: 'topright' }).addTo(map);
-
-      // CartoDB Voyager tiles with sharp contrast
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap &copy; CARTO',
-        maxZoom: 19,
-      }).addTo(map);
-
-      mapInstanceRef.current = map;
-    }
-
-    const map = mapInstanceRef.current;
-
-    // Custom Icon for Traveler
-    const userIcon = L.divIcon({
-      className: 'custom-user-icon',
-      html: `
-        <div class="relative flex items-center justify-center w-10 h-10">
-          <span class="absolute w-10 h-10 rounded-full bg-blue-500 opacity-40 animate-ping"></span>
-          <div class="w-8 h-8 rounded-full bg-blue-600 border-2 border-white shadow-xl flex items-center justify-center text-white text-xs">
-            <i class="fa-solid fa-person-walking"></i>
-          </div>
-        </div>
-      `,
-      iconSize: [40, 40],
-      iconAnchor: [20, 20],
-    });
-
-    // Custom Icon for Host Buddy
-    const hostIcon = L.divIcon({
-      className: 'custom-host-icon',
-      html: `
-        <div class="relative flex items-center justify-center w-12 h-12">
-          <span class="absolute w-12 h-12 rounded-full bg-[#A82323] opacity-40 animate-ping"></span>
-          <div class="w-9 h-9 rounded-full bg-[#A82323] border-2 border-amber-400 shadow-2xl flex items-center justify-center text-amber-300 text-sm">
-            <i class="fa-solid fa-motorcycle"></i>
-          </div>
-        </div>
-      `,
-      iconSize: [48, 48],
-      iconAnchor: [24, 24],
-    });
-
-    // User Marker
-    if (userMarkerRef.current) {
-      userMarkerRef.current.setLatLng([userCoords.lat, userCoords.lng]);
-    } else {
-      userMarkerRef.current = L.marker([userCoords.lat, userCoords.lng], { icon: userIcon })
-        .addTo(map)
-        .bindPopup(`<b>${activeUser?.name || 'Traveler'}</b><br>${t.yourLocation}`);
-    }
-
-    // Host Marker
-    const hostName = booking?.hostName || 'Nguyễn Minh Tuấn (Buddy)';
-    if (hostMarkerRef.current) {
-      hostMarkerRef.current.setLatLng([hostCoords.lat, hostCoords.lng]);
-    } else {
-      hostMarkerRef.current = L.marker([hostCoords.lat, hostCoords.lng], { icon: hostIcon })
-        .addTo(map)
-        .bindPopup(`<b>${hostName}</b><br>${t.hostLocation}`);
-    }
-
-    // Polyline
-    if (polylineRef.current) {
-      polylineRef.current.setLatLngs([
-        [userCoords.lat, userCoords.lng],
-        [hostCoords.lat, hostCoords.lng],
-      ]);
-    } else {
-      polylineRef.current = L.polyline(
-        [
-          [userCoords.lat, userCoords.lng],
-          [hostCoords.lat, hostCoords.lng],
-        ],
-        { color: '#A82323', weight: 3.5, dashArray: '6, 8', opacity: 0.85 }
-      ).addTo(map);
-    }
-
-    setTimeout(() => map.invalidateSize(), 150);
-
-    return () => {
-      // Map instance preserved or cleaned
-    };
-  }, [isOpen, userCoords, hostCoords, activeUser, booking, t]);
-
   const handleCenterOnUser = useCallback(() => {
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([userCoords.lat, userCoords.lng], 16, { animate: true });
-      sounds.playTap();
-    }
+    mapRef.current?.centerOn(userCoords, 16);
+    sounds.playTap();
   }, [userCoords]);
 
   const handleFitRoute = useCallback(() => {
-    if (mapInstanceRef.current) {
-      const bounds = L.latLngBounds([
-        [userCoords.lat, userCoords.lng],
-        [hostCoords.lat, hostCoords.lng],
-      ]);
-      mapInstanceRef.current.fitBounds(bounds, { padding: [60, 60], maxZoom: 16 });
-      sounds.playTap();
-    }
-  }, [userCoords, hostCoords]);
+    mapRef.current?.fitBoth();
+    sounds.playTap();
+  }, []);
 
   const handleSelectLandmark = (landmark: typeof VIETNAM_LANDMARKS[0]) => {
     setUserCoords({ lat: landmark.lat, lng: landmark.lng });
     setHostCoords({ lat: landmark.hostLat, lng: landmark.hostLng });
     setGpsStatus('simulated');
+    setGpsError('');
     setAccuracyMeters(5);
     sounds.playNotificationPing();
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([landmark.lat, landmark.lng], 15, { animate: true });
-    }
+    mapRef.current?.centerOn({ lat: landmark.lat, lng: landmark.lng }, 15);
   };
 
   const handleTriggerSOS = () => {
+    // The one deliberate exception to the consent gate. Confirming SOS *is*
+    // consent to share position: an alert carrying the default Hanoi fallback
+    // coordinates would be worse than no alert, because it sends help to the
+    // wrong place. The grant created here is bound by the same expiry and the
+    // same PIN-protected stop as any other.
+    if (booking && verdict.state !== 'active') {
+      grantSharing(booking);
+      setVerdict(shareVerdict(booking));
+    }
     setSosActive(true);
     setSosModalOpen(false);
     sounds.playSosSiren();
@@ -338,9 +306,17 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
                     ĐANG KẾT NỐI VỆ TINH...
                   </span>
                 )}
-                {(gpsStatus === 'permission_denied' || gpsStatus === 'simulated') && (
+                {gpsStatus === 'simulated' && (
                   <span className="px-2 py-0.5 bg-stone-700 text-amber-300 text-[10px] font-bold rounded-full">
-                    GPS VIỆT NAM
+                    {isVi ? 'ĐIỂM HẸN MẪU' : 'SAMPLE LOCATION'}
+                  </span>
+                )}
+                {(gpsStatus === 'permission_denied' ||
+                  gpsStatus === 'unavailable' ||
+                  gpsStatus === 'timeout' ||
+                  gpsStatus === 'insecure') && (
+                  <span className="px-2 py-0.5 bg-amber-600 text-white text-[10px] font-bold rounded-full">
+                    {isVi ? 'CHƯA CÓ GPS' : 'GPS UNAVAILABLE'}
                   </span>
                 )}
               </div>
@@ -351,6 +327,19 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* While the consent gate is up the map — and with it the big SOS
+                button — is not rendered. An emergency control must not be
+                reachable only after agreeing to routine tracking. */}
+            {verdict.state !== 'active' && (
+              <button
+                onClick={() => setSosModalOpen(true)}
+                className="px-3 py-1.5 rounded-full bg-red-600 hover:bg-red-500 text-white text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 cursor-pointer shadow-lg"
+                title={t.sosPanicButton}
+              >
+                <i className="fa-solid fa-bell text-amber-300"></i>
+                SOS
+              </button>
+            )}
             <button
               onClick={onClose}
               className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
@@ -360,6 +349,54 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
           </div>
         </div>
 
+        {/*
+          Until this booking has an active grant the radar shows the consent
+          screen and nothing else. Rendering the map underneath would invite
+          the reflex of tapping past the explanation.
+        */}
+        {booking && verdict.state === 'scheduled' && (
+          <div className="flex flex-col items-center gap-3 p-8 text-center">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-amber-100 text-amber-700">
+              <i className="fa-regular fa-clock text-xl"></i>
+            </span>
+            <h3 className="text-sm font-bold text-stone-900">
+              {isVi ? 'Đã bật — sẽ bắt đầu trước giờ hẹn' : 'Enabled — starts before your meetup'}
+            </h3>
+            <p className="max-w-sm text-xs leading-relaxed text-stone-500">
+              {isVi
+                ? `Chia sẻ vị trí với ${verdict.grant.hostName} sẽ tự bật sau ${formatRemaining(
+                    verdict.opensInMs,
+                    true,
+                  )}, tức 1 giờ trước giờ hẹn. Từ giờ tới lúc đó ViS-Go không đọc vị trí của bạn.`
+                : `Sharing with ${verdict.grant.hostName} switches on in ${formatRemaining(
+                    verdict.opensInMs,
+                    false,
+                  )} — one hour before the meeting time. Until then ViS-Go reads nothing.`}
+            </p>
+            <button
+              onClick={() => setStopDialogOpen(true)}
+              className="mt-1 cursor-pointer rounded-xl border border-stone-200 px-4 py-2 text-xs font-bold text-stone-700 hover:bg-stone-50"
+            >
+              <i className="fa-solid fa-key mr-1.5"></i>
+              {isVi ? 'Huỷ chia sẻ (cần mã PIN)' : 'Cancel sharing (PIN required)'}
+            </button>
+          </div>
+        )}
+
+        {booking && (verdict.state === 'none' || verdict.state === 'expired') && (
+          <LocationConsentGate
+            booking={booking}
+            language={language}
+            onGrant={() => {
+              grantSharing(booking);
+              setVerdict(shareVerdict(booking));
+            }}
+            onCancel={onClose}
+          />
+        )}
+
+        {(!booking || verdict.state === 'active') && (
+        <>
         {/* SOS Alert Banner if Active */}
         {sosActive && (
           <div className="bg-red-600 text-white px-4 py-3 flex items-center justify-between animate-pulse shrink-0">
@@ -372,6 +409,33 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
               className="px-3 py-1 bg-white text-red-700 text-xs font-black rounded-lg uppercase tracking-wider cursor-pointer hover:bg-stone-100"
             >
               {t.sosCancel}
+            </button>
+          </div>
+        )}
+
+        {/*
+          Always-on indicator. A safety feature that shares your position must
+          never be something you can forget is running.
+        */}
+        {verdict.state === 'active' && (
+          <div className="shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-[11px] text-emerald-900">
+            <span className="flex items-center gap-1.5 font-bold">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600"></span>
+              </span>
+              {isVi ? 'Đang chia sẻ vị trí với' : 'Sharing live location with'} {verdict.grant.hostName}
+            </span>
+            <span className="text-emerald-700">
+              <i className="fa-regular fa-clock mr-1"></i>
+              {isVi ? 'Tự tắt sau' : 'Auto-stops in'} {formatRemaining(verdict.endsInMs, isVi)}
+            </span>
+            <button
+              onClick={() => setStopDialogOpen(true)}
+              className="ml-auto cursor-pointer rounded-lg bg-emerald-700 px-2.5 py-1 font-bold text-white transition-colors hover:bg-emerald-800"
+            >
+              <i className="fa-solid fa-key mr-1"></i>
+              {isVi ? 'Tắt' : 'Stop'}
             </button>
           </div>
         )}
@@ -394,29 +458,61 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
           <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs">
             <span className="text-[10px] text-stone-400 font-semibold block">{t.hostLocation}</span>
             <span className="font-bold text-stone-800 text-xs truncate block">
-              {booking?.hostName || 'Tommy (Buddy)'}
+              {booking?.hostName || '—'}
             </span>
           </div>
 
           <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <span className="text-[10px] text-stone-400 font-semibold block">GPS Live Status</span>
-              <span className="font-bold text-emerald-700 text-xs flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                {isGpsSharing ? (isVi ? 'Đang bật' : 'ON') : (isVi ? 'Tắt' : 'OFF')}
+              <span
+                className={`font-bold text-xs flex items-center gap-1 ${
+                  isGpsSharing ? 'text-emerald-700' : 'text-stone-500'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${isGpsSharing ? 'bg-emerald-500' : 'bg-stone-400'}`}
+                ></span>
+                {isGpsSharing ? (isVi ? 'Đang chia sẻ' : 'Sharing') : (isVi ? 'Tắt' : 'Off')}
               </span>
             </div>
-            <button
-              onClick={() => setIsGpsSharing(!isGpsSharing)}
-              className={`w-7 h-7 rounded-lg flex items-center justify-center text-xs cursor-pointer ${
-                isGpsSharing ? 'bg-emerald-100 text-emerald-700' : 'bg-stone-200 text-stone-600'
-              }`}
-              title="Bật/Tắt định vị thiết bị"
-            >
-              <i className="fa-solid fa-location-arrow"></i>
-            </button>
+            {/*
+              Off is one tap; on is not, and neither is off without the PIN.
+              This tile used to be a bare toggle, so anyone holding the phone
+              could silently switch live location on or off.
+            */}
+            {isGpsSharing && (
+              <button
+                onClick={() => setStopDialogOpen(true)}
+                className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs cursor-pointer bg-stone-900 text-[#D4AF37] hover:bg-stone-800"
+                title={isVi ? 'Tắt chia sẻ vị trí (cần mã PIN)' : 'Stop sharing (PIN required)'}
+              >
+                <i className="fa-solid fa-key"></i>
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Actionable GPS diagnostics — replaces the old silent failure */}
+        {gpsError && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-start gap-2.5 text-[11px] text-amber-900 shrink-0">
+            <i className="fa-solid fa-triangle-exclamation mt-0.5 text-amber-600"></i>
+            <p className="leading-relaxed flex-1">{gpsError}</p>
+            {(gpsStatus === 'permission_denied' || gpsStatus === 'unavailable' || gpsStatus === 'timeout') && (
+              <button
+                onClick={() => {
+                  // Force the watch effect to tear down and re-subscribe by
+                  // re-reading the grant; nothing here may bypass the policy.
+                  setVerdict({ state: 'none' });
+                  setTimeout(() => setVerdict(shareVerdict(booking)), 80);
+                }}
+                className="shrink-0 px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold rounded-lg cursor-pointer"
+              >
+                {isVi ? 'Thử lại' : 'Retry'}
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Quick Vietnam City Landmark Switcher */}
         <div className="bg-stone-50 px-3 py-1.5 border-b border-stone-200 flex items-center gap-2 overflow-x-auto text-[11px] shrink-0">
@@ -437,9 +533,16 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
           </div>
         </div>
 
-        {/* Leaflet Map Interactive Canvas */}
+        {/* Interactive Map Canvas — Google Maps when keyed, Leaflet otherwise */}
         <div className="relative flex-1 min-h-[340px] sm:min-h-[400px] bg-stone-200">
-          <div ref={mapContainerRef} className="w-full h-full min-h-[340px] sm:min-h-[400px] z-10" />
+          <RadarMap
+            ref={mapRef}
+            userCoords={userCoords}
+            hostCoords={hostCoords}
+            userLabel={`${activeUser?.name || 'Traveler'} — ${t.yourLocation}`}
+            hostLabel={`${booking?.hostName || 'Nguyễn Minh Tuấn (Buddy)'} — ${t.hostLocation}`}
+            onBackendResolved={setMapBackend}
+          />
 
           {/* Map Controls: Center on Me & Fit Route */}
           <div className="absolute top-3 left-3 z-20 flex flex-col gap-1.5">
@@ -459,11 +562,34 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
               <i className="fa-solid fa-route text-[#A82323]"></i>
               <span className="hidden sm:inline">{isVi ? 'Toàn cảnh lộ trình' : 'Fit Route'}</span>
             </button>
+
+            {/* Hand the live route off to the real Google Maps app */}
+            <a
+              href={buildGoogleMapsDirectionsUrl(userCoords, hostCoords)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-2 bg-white/95 hover:bg-white text-stone-800 font-bold text-xs rounded-xl shadow-lg border border-stone-200 flex items-center gap-1.5 cursor-pointer backdrop-blur-xs transition-all"
+              title={isVi ? 'Mở chỉ đường trong Google Maps' : 'Open directions in Google Maps'}
+            >
+              <i className="fa-solid fa-diamond-turn-right text-emerald-600"></i>
+              <span className="hidden sm:inline">Google Maps</span>
+            </a>
           </div>
 
           {/* GPS Coordinates readout */}
-          <div className="absolute top-3 right-3 z-20 bg-stone-900/85 text-white px-3 py-1.5 rounded-xl text-[10px] font-mono shadow-md backdrop-blur-xs hidden sm:block">
-            📍 {userCoords.lat.toFixed(4)}, {userCoords.lng.toFixed(4)} {lastUpdated ? `• ${lastUpdated}` : ''}
+          <div className="absolute top-3 right-3 z-20 flex flex-col items-end gap-1.5">
+            <a
+              href={buildGoogleMapsCoordUrl(userCoords.lat, userCoords.lng)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-stone-900/85 hover:bg-stone-900 text-white px-3 py-1.5 rounded-xl text-[10px] font-mono shadow-md backdrop-blur-xs hidden sm:block cursor-pointer"
+              title={isVi ? 'Mở toạ độ này trong Google Maps' : 'Open these coordinates in Google Maps'}
+            >
+              <i className="fa-solid fa-location-dot mr-1.5"></i>{userCoords.lat.toFixed(4)}, {userCoords.lng.toFixed(4)} {lastUpdated ? `• ${lastUpdated}` : ''}
+            </a>
+            <span className="bg-stone-900/70 text-stone-300 px-2 py-0.5 rounded-lg text-[9px] font-semibold hidden sm:block">
+              {mapBackend === 'google' ? 'Google Maps' : 'OpenStreetMap'}
+            </span>
           </div>
 
           {/* Quick Floating Chat Button */}
@@ -487,8 +613,25 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
             <span>{t.sosPanicButton}</span>
           </button>
         </div>
+        </>
+        )}
 
       </div>
+
+      {/* PIN prompt for stopping. Rendered above the radar so it cannot be
+          dismissed by scrolling the panel behind it. */}
+      {stopDialogOpen && booking && (verdict.state === 'active' || verdict.state === 'scheduled') && (
+        <StopSharingDialog
+          bookingId={booking.id}
+          hostName={verdict.grant.hostName}
+          language={language}
+          onStopped={() => {
+            setStopDialogOpen(false);
+            setVerdict(shareVerdict(booking));
+          }}
+          onCancel={() => setStopDialogOpen(false)}
+        />
+      )}
 
       {/* SOS Confirmation Modal */}
       {sosModalOpen && (
@@ -507,9 +650,9 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
             </p>
 
             <div className="p-3 bg-stone-100 rounded-xl text-[11px] text-stone-700 text-left font-mono space-y-1">
-              <div>📍 Tọa độ: {userCoords.lat.toFixed(5)}, {userCoords.lng.toFixed(5)}</div>
-              <div>🚨 Điều phối khẩn cấp: Công an Du lịch 113 & ViS-Go Safety Shield</div>
-              <div>⚡ Thời gian phản hồi: Giao thức tự động phát tín hiệu 24/7</div>
+              <div><i className="fa-solid fa-location-dot mr-1.5"></i>Tọa độ: {userCoords.lat.toFixed(5)}, {userCoords.lng.toFixed(5)}</div>
+              <div><i className="fa-solid fa-tower-broadcast mr-1.5"></i>Điều phối khẩn cấp: Công an Du lịch 113 & ViS-Go Safety Shield</div>
+              <div><i className="fa-solid fa-bolt mr-1.5"></i>Thời gian phản hồi: Giao thức tự động phát tín hiệu 24/7</div>
             </div>
 
             <div className="flex gap-3 pt-2">

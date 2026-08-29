@@ -12,16 +12,39 @@
 
   html, body, #root {
     font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important;
-    background-color: #FAF7F2;
     color: #1C1917;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* The cream ground lives on html only.
+     PageBackdrop paints the app's decorative layer at z-index -10, so anything
+     between it and the viewer with an opaque background hides it completely.
+     #root used to carry this colour and did exactly that — the whole backdrop
+     shipped invisible with no error anywhere to explain it. html is behind the
+     backdrop, so the colour still covers overscroll and the pre-hydration
+     paint without burying the decoration. */
+  html {
+    background-color: #FAF7F2;
   }
 
   /* Standardize all typography elements to Be Vietnam Pro */
   h1, h2, h3, h4, h5, h6, p, span, button, input, textarea, select, a, strong, div {
     font-family: 'Be Vietnam Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   }
+}
+
+/*
+ * Brand signature face.
+ *
+ * `.font-serif` above is deliberately remapped onto Be Vietnam Pro so the
+ * interface stays in one voice. The signature is the one place that should
+ * *not* be — it is a byline, not UI — so it gets its own class and its own
+ * family rather than fighting that rule.
+ */
+.font-display {
+  font-family: 'Playfair Display', 'Be Vietnam Pro', Georgia, serif !important;
+  font-feature-settings: "liga", "kern";
 }
 
 .font-serif, .serif {
@@ -56,4 +79,101 @@
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chim Lạc — gentle flight                                            */
+/* ------------------------------------------------------------------ */
+/*
+  `LacBird` draws itself still and exposes its moving parts as named groups
+  (`lac-wing-upper`, `lac-wing-lower`, `lac-tailfan`), each already pivoting on
+  its own joint. Put `lac-flap` on any ancestor and that bird flies.
+
+  Deliberately much softer than the opening sequence, which beats sixteen times
+  in twelve seconds because its birds are crossing the sky. These ones hover
+  over the hero for as long as the visitor stays, and a wingbeat at that rate
+  behind a headline is a flicker you cannot read past. One slow cycle, small
+  angles, and the three parts share a period but not a phase — moving the tail
+  exactly with the wing is what makes an animated bird look like a hinged toy.
+*/
+.lac-flap {
+  /* Custom properties, because they inherit and `animation-delay` does not:
+     the beat is set on the wrapper and reaches the groups inside the SVG. A
+     negative phase starts the bird part-way through its cycle, so a flock does
+     not beat in unison like a rowing eight. */
+  --lac-beat: 3.6s;
+  --lac-phase: 0s;
+}
+.lac-flap-b {
+  --lac-beat: 4.3s;
+  --lac-phase: -1.4s;
+}
+.lac-flap-c {
+  --lac-beat: 3.1s;
+  --lac-phase: -2.2s;
+}
+
+.lac-flap .lac-wing-upper {
+  animation: lac-flap-up var(--lac-beat) ease-in-out var(--lac-phase) infinite;
+}
+.lac-flap .lac-wing-lower {
+  animation: lac-flap-low var(--lac-beat) ease-in-out var(--lac-phase) infinite;
+}
+.lac-flap .lac-tailfan {
+  animation: lac-tail-sway var(--lac-beat) ease-in-out var(--lac-phase) infinite;
+}
+/* The bird rises a little as the wings come down, which is what stops the
+   flapping reading as a wing waving next to a stationary body. */
+.lac-flap > svg,
+svg.lac-flap {
+  animation: lac-glide var(--lac-beat) ease-in-out var(--lac-phase) infinite;
+}
+
+@keyframes lac-flap-up {
+  0%,
+  100% {
+    transform: rotate(-7deg);
+  }
+  50% {
+    transform: rotate(6deg);
+  }
+}
+@keyframes lac-flap-low {
+  0%,
+  100% {
+    transform: rotate(4deg);
+  }
+  50% {
+    transform: rotate(-5deg);
+  }
+}
+@keyframes lac-tail-sway {
+  0%,
+  100% {
+    transform: rotate(2.5deg);
+  }
+  55% {
+    transform: rotate(-2deg);
+  }
+}
+@keyframes lac-glide {
+  0%,
+  100% {
+    transform: translateY(1.5%);
+  }
+  50% {
+    transform: translateY(-1.5%);
+  }
+}
+
+/* Movement that loops forever with no way to stop it is exactly what this
+   setting exists for. */
+@media (prefers-reduced-motion: reduce) {
+  .lac-flap .lac-wing-upper,
+  .lac-flap .lac-wing-lower,
+  .lac-flap .lac-tailfan,
+  .lac-flap > svg,
+  svg.lac-flap {
+    animation: none;
+  }
 }

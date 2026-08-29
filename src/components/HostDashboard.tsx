@@ -1,24 +1,60 @@
 import React, { useState } from 'react';
-import { Booking, Language, User } from '../types';
+import { Booking, HostKycApplication, Language, Tour, User } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
 import { HostProfileEditor } from './HostProfileEditor';
+import { HostVerificationForm } from './HostVerificationForm';
+import { Avatar } from './Avatar';
 
+/**
+ * The host's own workspace.
+ *
+ * This panel was trimmed back hard, because most of what it showed was not
+ * true. Four things were invented outright and have been deleted:
+ *
+ *   - 38,500,000₫ was ADDED to earnings, and 78 to the completed-trip count.
+ *     A host reading their own payout figure was reading a number nobody owed
+ *     them.
+ *   - "4.98 (142)" was printed as the rating for every host on the platform,
+ *     including one who had never been reviewed.
+ *   - "Tốc độ phản hồi: < 5 phút (100%)" measured nothing. We do not record
+ *     reply times anywhere.
+ *   - "VERIFIED BUDDY" was stamped on every host regardless of `verified`,
+ *     which is the one badge on this page that a traveller might act on.
+ *
+ * What is left is counted from the host's own bookings, listings and profile,
+ * and a figure with nothing behind it says so rather than showing a zero that
+ * reads like a bad result.
+ */
 interface HostDashboardProps {
   activeUser: User | null;
   bookings: Booking[];
+  /** Every published tour; filtered to this host's own for the listing count. */
+  tours: Tour[];
   language: Language;
   currency: 'VND' | 'USD';
   onUpdateBookingStatus: (bookingId: string, newStatus: 'confirmed' | 'cancelled') => void;
   onOpenLiveRadar: (booking: Booking) => void;
-  onOpenChat: () => void;
+  /** Opens the conversation for this specific trip, not a generic inbox. */
+  onOpenChat: (booking: Booking) => void;
   onSwitchToStudio: () => void;
   onSaveProfile: (updatedUser: User) => void;
+  /** Which tab to open on. Lets the account modal link straight to the
+      public-profile editor rather than "the dashboard, then click Hồ sơ". */
+  initialTab?: 'bookings' | 'profile' | 'verify';
+  /** Opens the account modal, which owns photo, name, phone and city. */
+  onOpenAccount?: () => void;
+  /** Opens one of this host's own listings in the studio for editing. */
+  onEditTour?: (tour: Tour) => void;
+  /** Every verification application this session can see; filtered to the host's own. */
+  kycApplications: HostKycApplication[];
+  onSubmitKyc: (application: HostKycApplication) => void;
 }
 
 export const HostDashboard: React.FC<HostDashboardProps> = ({
   activeUser,
   bookings,
+  tours,
   language,
   currency,
   onUpdateBookingStatus,
@@ -26,19 +62,41 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
   onOpenChat,
   onSwitchToStudio,
   onSaveProfile,
+  initialTab = 'bookings',
+  onOpenAccount,
+  onEditTour,
+  kycApplications,
+  onSubmitKyc,
 }) => {
   const t = translations[language];
-  const [activeTab, setActiveTab] = useState<'bookings' | 'profile'>('bookings');
+  const [activeTab, setActiveTab] = useState<'bookings' | 'profile' | 'verify'>(initialTab);
+
+  // A host may only ever have one application, so the first match is the one.
+  const myKyc = kycApplications.find((k) => k.hostId === activeUser?.id) ?? null;
   const [isAccepting, setIsAccepting] = useState<boolean>(activeUser?.isAcceptingGuests ?? true);
 
-  // Filter bookings for this host (or all if demo)
-  const hostBookings = bookings.filter(b => b.hostId === activeUser?.id || activeUser?.role === 'host');
+  /*
+    This host's bookings.
 
-  const totalEarningsVND = hostBookings
-    .filter(b => b.status === 'confirmed' || b.status === 'completed')
-    .reduce((acc, curr) => acc + (curr.totalPriceVND - curr.platformFeeVND), 0) + 38500000;
+    The second clause used to be `|| activeUser?.role === 'host'`, which is true
+    for every host reading the page — so the filter passed everything and each
+    host saw every other host's guests, names and phone numbers. Firestore's
+    rules were never the problem; this was a client-side list that had already
+    been fetched. One condition, no escape hatch.
+  */
+  const hostBookings = bookings.filter((b) => b.hostId === activeUser?.id);
+  const myTours = tours.filter((tr) => tr.hostId === activeUser?.id);
 
-  const completedTrips = hostBookings.filter(b => b.status === 'completed').length + 78;
+  const earnedBookings = hostBookings.filter(
+    (b) => b.status === 'confirmed' || b.status === 'completed',
+  );
+  const totalEarningsVND = earnedBookings.reduce(
+    (acc, curr) => acc + (curr.totalPriceVND - curr.platformFeeVND),
+    0,
+  );
+  const completedTrips = hostBookings.filter((b) => b.status === 'completed').length;
+  const pendingCount = hostBookings.filter((b) => b.status === 'pending').length;
+  const reviewCount = activeUser?.reviewCount ?? 0;
 
   const handleAccept = (bookingId: string) => {
     onUpdateBookingStatus(bookingId, 'confirmed');
@@ -79,6 +137,22 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
             <i className="fa-solid fa-user-pen"></i>
             <span>{t.hostProfileTab}</span>
           </button>
+
+          <button
+            onClick={() => setActiveTab('verify')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+              activeTab === 'verify'
+                ? 'bg-[#A82323] text-white shadow-xs'
+                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-100'
+            }`}
+          >
+            <i className="fa-solid fa-id-card"></i>
+            <span>{language === 'vi' ? 'Xác minh' : 'Verify'}</span>
+            {/* The one state worth a dot in the tab bar: nothing sent yet. */}
+            {!myKyc && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37]" aria-hidden="true"></span>
+            )}
+          </button>
         </div>
 
         <button
@@ -90,10 +164,18 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
         </button>
       </div>
 
-      {activeTab === 'profile' ? (
+      {activeTab === 'verify' ? (
+        <HostVerificationForm
+          activeUser={activeUser}
+          language={language}
+          application={myKyc}
+          onSubmit={onSubmitKyc}
+        />
+      ) : activeTab === 'profile' ? (
         <HostProfileEditor
           activeUser={activeUser}
           language={language}
+          onOpenAccount={onOpenAccount}
           onSaveProfile={(user) => {
             onSaveProfile(user);
             setActiveTab('bookings');
@@ -106,9 +188,11 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div className="flex items-center gap-4">
                 <div className="relative">
-                  <img
-                    src={activeUser?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'}
-                    alt={activeUser?.name}
+                  {/* The stock Unsplash portrait that used to stand in here was a
+                      photograph of a real stranger shown as this host's own face. */}
+                  <Avatar
+                    src={activeUser?.avatar}
+                    name={activeUser?.name ?? ''}
                     className="w-16 h-16 rounded-full object-cover border-2 border-amber-400 shadow-md"
                   />
                   <button
@@ -122,14 +206,16 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                 <div>
                   <div className="flex items-center gap-2">
                     <h2 className="font-serif text-xl sm:text-2xl font-bold">{activeUser?.name}</h2>
-                    <span className="px-2.5 py-0.5 bg-amber-400 text-stone-950 text-[10px] font-black uppercase rounded-full">
-                      VERIFIED BUDDY
-                    </span>
+                    {activeUser?.verified && (
+                      <span className="px-2.5 py-0.5 bg-amber-400 text-stone-950 text-[10px] font-black uppercase rounded-full">
+                        {language === 'vi' ? 'ĐÃ XÁC THỰC' : 'VERIFIED'}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-stone-300 mt-0.5">{t.hostDashTitle}</p>
                   {activeUser?.languages && (
                     <p className="text-[11px] text-amber-300 mt-1 flex items-center gap-1">
-                      <span>🗣️</span>
+                      <i className="fa-solid fa-language text-stone-500"></i>
                       <span>{activeUser.languages.join(' • ')}</span>
                     </p>
                   )}
@@ -146,8 +232,13 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                 </div>
                 <button
                   onClick={() => {
-                    setIsAccepting(!isAccepting);
+                    // Was local state only: the switch moved, nothing was
+                    // saved, and it was back on after a reload. It writes to
+                    // the profile now, the same as any other profile field.
+                    const next = !isAccepting;
+                    setIsAccepting(next);
                     sounds.playNotificationPing();
+                    if (activeUser) onSaveProfile({ ...activeUser, isAcceptingGuests: next });
                   }}
                   className={`w-12 h-6 rounded-full transition-colors relative cursor-pointer ${
                     isAccepting ? 'bg-emerald-500' : 'bg-stone-600'
@@ -162,75 +253,127 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
               </div>
             </div>
 
-            {/* 4 Metric Cards Grid */}
+            {/* Four figures, each counted from this host's own rows. */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-6 border-t border-white/10">
               <div className="bg-black/25 p-3.5 rounded-2xl border border-white/5">
                 <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.totalEarningsLabel}</span>
                 <span className="text-base sm:text-lg font-extrabold text-amber-300">
-                  {currency === 'USD' ? `$${Math.round(totalEarningsVND / 25000)}` : `${totalEarningsVND.toLocaleString('vi-VN')}₫`}
+                  {currency === 'USD'
+                    ? `$${Math.round(totalEarningsVND / 25000).toLocaleString('en-US')}`
+                    : `${totalEarningsVND.toLocaleString('vi-VN')}₫`}
+                </span>
+                <span className="text-[10px] text-stone-500 block mt-0.5">
+                  {language === 'vi'
+                    ? `${earnedBookings.length} đơn đã nhận`
+                    : `${earnedBookings.length} accepted booking${earnedBookings.length === 1 ? '' : 's'}`}
                 </span>
               </div>
 
               <div className="bg-black/25 p-3.5 rounded-2xl border border-white/5">
                 <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.completedTripsLabel}</span>
                 <span className="text-base sm:text-lg font-extrabold text-white">
-                  {completedTrips} {language === 'vi' ? 'chuyến đi' : 'trips'}
+                  {completedTrips} {language === 'vi' ? 'chuyến' : completedTrips === 1 ? 'trip' : 'trips'}
+                </span>
+                <span className="text-[10px] text-stone-500 block mt-0.5">
+                  {language === 'vi' ? `${pendingCount} đơn chờ duyệt` : `${pendingCount} awaiting your reply`}
                 </span>
               </div>
 
               <div className="bg-black/25 p-3.5 rounded-2xl border border-white/5">
                 <span className="text-[10px] text-stone-400 uppercase font-semibold block">{t.ratingLabel}</span>
-                <span className="text-base sm:text-lg font-extrabold text-amber-300 flex items-center gap-1">
-                  <i className="fa-solid fa-star text-xs"></i>
-                  4.98 (142)
-                </span>
+                {reviewCount > 0 ? (
+                  <>
+                    <span className="text-base sm:text-lg font-extrabold text-amber-300 flex items-center gap-1">
+                      <i className="fa-solid fa-star text-xs"></i>
+                      {(activeUser?.rating ?? 0).toFixed(2)}
+                    </span>
+                    <span className="text-[10px] text-stone-500 block mt-0.5">
+                      {language === 'vi' ? `${reviewCount} đánh giá` : `${reviewCount} review${reviewCount === 1 ? '' : 's'}`}
+                    </span>
+                  </>
+                ) : (
+                  /* A hard 0.00 reads as a terrible score. "Not yet rated" is
+                     the honest shape of an empty review list. */
+                  <span className="text-xs font-bold text-stone-400 block mt-1 leading-snug">
+                    {language === 'vi' ? 'Chưa có đánh giá nào' : 'Not rated yet'}
+                  </span>
+                )}
               </div>
 
               <div className="bg-black/25 p-3.5 rounded-2xl border border-white/5">
                 <span className="text-[10px] text-stone-400 uppercase font-semibold block">
-                  {language === 'vi' ? 'Tốc độ phản hồi' : 'Response Time'}
+                  {language === 'vi' ? 'Tour đang đăng' : 'Live listings'}
                 </span>
-                <span className="text-base sm:text-lg font-extrabold text-emerald-400">
-                  {language === 'vi' ? '< 5 phút (100%)' : '< 5 mins (100%)'}
-                </span>
+                <span className="text-base sm:text-lg font-extrabold text-white">{myTours.length}</span>
+                <button
+                  onClick={onSwitchToStudio}
+                  className="text-[10px] text-amber-300 hover:text-amber-200 block mt-0.5 cursor-pointer underline underline-offset-2"
+                >
+                  {language === 'vi' ? 'Đăng tour mới' : 'Publish a new tour'}
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Quick Profile Summary Banner */}
-          <div className="bg-gradient-to-r from-amber-50 to-orange-50/60 p-4 rounded-2xl border border-amber-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-[#A82323] text-white flex items-center justify-center text-sm shrink-0 shadow-2xs">
-                <i className="fa-solid fa-id-card-clip"></i>
+          {/* This host's own listings.
+              The dashboard used to show only a count, so a host who wanted to
+              fix a price or a typo had no way in at all — the studio only ever
+              created new tours, and the old listing stayed wrong. */}
+          {myTours.length > 0 && onEditTour && (
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <h3 className="font-bold text-base text-stone-900">
+                  {language === 'vi' ? 'Tour của bạn' : 'Your listings'}
+                </h3>
+                <span className="text-xs text-stone-500">({myTours.length})</span>
               </div>
-              <div>
-                <h4 className="text-xs font-bold text-stone-900">
-                  {language === 'vi' ? 'Hồ sơ Host Bản địa:' : 'Host Trust Profile:'} {activeUser?.name}
-                </h4>
-                <p className="text-[11px] text-stone-600 line-clamp-1 italic">
-                  "{language === 'vi' ? (activeUser?.bioVi || activeUser?.bio) : (activeUser?.bio || activeUser?.bioVi)}"
-                </p>
+
+              <div className="space-y-2">
+                {myTours.map((tour) => (
+                  <div
+                    key={tour.id}
+                    className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200"
+                  >
+                    <img
+                      src={tour.coverImage}
+                      alt=""
+                      loading="lazy"
+                      className="w-16 h-12 rounded-lg object-cover shrink-0 bg-stone-100"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-stone-900 truncate">
+                        {language === 'vi' ? tour.titleVi : tour.title}
+                      </p>
+                      <p className="text-[11px] text-stone-500">
+                        {tour.city} • {tour.priceVND.toLocaleString('vi-VN')}₫ •{' '}
+                        {tour.durationHours}
+                        {language === 'vi' ? ' giờ' : 'h'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sounds.playTap();
+                        onEditTour(tour);
+                      }}
+                      className="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-[11px] font-bold rounded-lg cursor-pointer shrink-0 flex items-center gap-1.5"
+                    >
+                      <i className="fa-solid fa-pen"></i>
+                      <span>{language === 'vi' ? 'Sửa' : 'Edit'}</span>
+                    </button>
+                  </div>
+                ))}
               </div>
             </div>
-            <button
-              onClick={() => setActiveTab('profile')}
-              className="px-3.5 py-1.5 bg-white hover:bg-stone-50 border border-amber-300 text-stone-800 text-xs font-bold rounded-xl shadow-2xs cursor-pointer shrink-0"
-            >
-              <i className="fa-solid fa-pen-to-square text-[#A82323] mr-1"></i>
-              {language === 'vi' ? 'Chỉnh sửa hồ sơ' : 'Edit Profile'}
-            </button>
-          </div>
+          )}
 
-          {/* Action Bar: Create New Tour */}
-          <div className="flex items-center justify-between">
+          {/* The studio button is already in the tab bar above and on the
+              listings card; a third copy here was noise. */}
+          <div className="flex items-baseline gap-2">
             <h3 className="font-bold text-base text-stone-900">{t.incomingBookings}</h3>
-            <button
-              onClick={onSwitchToStudio}
-              className="px-4 py-2 bg-[#A82323] hover:bg-[#8C1818] text-white text-xs font-bold rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <i className="fa-solid fa-plus"></i>
-              <span>{t.creatorStudio}</span>
-            </button>
+            {hostBookings.length > 0 && (
+              <span className="text-xs text-stone-500">({hostBookings.length})</span>
+            )}
           </div>
 
           {/* Incoming Bookings Table / Cards */}
@@ -253,22 +396,30 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                           : 'bg-stone-100 text-stone-600'
                       }`}
                     >
-                      {b.status.toUpperCase()}
+                      {b.status === 'confirmed'
+                        ? language === 'vi' ? 'ĐÃ XÁC NHẬN' : 'CONFIRMED'
+                        : b.status === 'pending'
+                        ? language === 'vi' ? 'CHỜ DUYỆT' : 'PENDING'
+                        : b.status === 'completed'
+                        ? language === 'vi' ? 'HOÀN THÀNH' : 'COMPLETED'
+                        : language === 'vi' ? 'ĐÃ HỦY' : 'CANCELLED'}
                     </span>
                   </div>
 
                   <div className="flex items-start gap-3">
                     <img src={b.tourImage} alt={b.tourTitle} className="w-16 h-16 rounded-xl object-cover" />
                     <div className="min-w-0 flex-1">
-                      <h4 className="font-bold text-xs text-stone-900 line-clamp-1">{b.tourTitle}</h4>
+                      <h4 className="font-bold text-xs text-stone-900 line-clamp-1">
+                        {language === 'vi' ? (b.tourTitleVi || b.tourTitle) : b.tourTitle}
+                      </h4>
                       <p className="text-[11px] text-stone-500 mt-0.5">
-                        <strong>Guest:</strong> {b.customerName} ({b.customerPhone})
+                        <strong>{language === 'vi' ? 'Khách:' : 'Guest:'}</strong> {b.customerName} ({b.customerPhone})
                       </p>
                       <p className="text-[11px] text-stone-500">
-                        <strong>Schedule:</strong> {b.bookingDate} @ {b.bookingTime} ({b.guestsCount} pax)
+                        <strong>{language === 'vi' ? 'Lịch trình:' : 'Schedule:'}</strong> {b.bookingDate} @ {b.bookingTime} ({b.guestsCount} {language === 'vi' ? 'khách' : 'pax'})
                       </p>
                       <p className="text-xs font-extrabold text-[#A82323] mt-1">
-                        Payout: {(b.totalPriceVND - b.platformFeeVND).toLocaleString('vi-VN')} VND
+                        {language === 'vi' ? 'Thực nhận:' : 'Payout:'} {(b.totalPriceVND - b.platformFeeVND).toLocaleString('vi-VN')}₫
                       </p>
                     </div>
                   </div>
@@ -287,14 +438,14 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                         className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <i className="fa-solid fa-location-crosshairs text-amber-700"></i>
-                        <span>GPS Radar</span>
+                        <span>{language === 'vi' ? 'Định vị GPS' : 'GPS Radar'}</span>
                       </button>
                       <button
-                        onClick={onOpenChat}
+                        onClick={() => onOpenChat(b)}
                         className="px-2.5 py-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <i className="fa-regular fa-comment-dots text-stone-600"></i>
-                        <span>Chat</span>
+                        <span>{language === 'vi' ? 'Nhắn tin' : 'Chat'}</span>
                       </button>
                     </div>
 

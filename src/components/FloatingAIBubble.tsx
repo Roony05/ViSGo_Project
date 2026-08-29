@@ -34,14 +34,16 @@ export const FloatingAIBubble: React.FC<FloatingAIBubbleProps> = ({
         <span className="absolute bottom-0.5 right-0.5 w-3.5 h-3.5 bg-emerald-500 border-2 border-white rounded-full"></span>
       </button>
 
-      {/* Single label pill below: strictly ViS-AI */}
-      <button
-        onClick={handleClick}
-        className="px-2.5 py-0.5 bg-stone-900/90 hover:bg-stone-900 text-white text-[11px] font-bold rounded-full shadow-md transition-colors flex items-center gap-1.5 border border-stone-700/60 cursor-pointer tracking-wide"
+      {/* Label for the bubble above, not a control of its own. It used to be a
+          second <button> firing the same handler: a duplicate tap target, and
+          at 23px tall the smallest one on the page. */}
+      <span
+        aria-hidden="true"
+        className="px-2.5 py-0.5 bg-stone-900/90 text-white text-[11px] font-bold rounded-full shadow-md flex items-center gap-1.5 border border-stone-700/60 tracking-wide"
       >
         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
         <span>ViS-AI</span>
-      </button>
+      </span>
     </aside>
   );
 };

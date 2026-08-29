@@ -1,28 +1,54 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { User, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { resizeImageFile, resizeFailureMessage } from '../utils/imageResize';
+import { externaliseAvatar, isInlineImage } from '../utils/avatarStore';
+import { ProvinceSelect } from './ProvinceSelect';
+import { Avatar } from './Avatar';
 
+/**
+ * Account settings — deliberately small.
+ *
+ * This modal used to carry ten fields for everyone, most of which belonged to
+ * somebody else's job:
+ *
+ *   - AN AVATAR URL BOX. It asked a traveller to paste an `https://…` link to a
+ *     picture. Nobody outside a developer has one to hand. Underneath sat five
+ *     Unsplash stock portraits offered as "quick presets" — photographs of real
+ *     strangers, handed out as identities. Both are gone; the file picker below
+ *     is the same one the host profile editor already used, and it re-encodes
+ *     the picture so it fits in a Firestore document.
+ *
+ *   - A SECOND BIO BOX THAT SAVED NOWHERE. The English bio here was written to
+ *     `user.bioEn`, a field that does not exist on the User type and that no
+ *     component reads. The public English bio is `user.bio`, which only the
+ *     host profile editor writes. So a host who filled this in, saved, and then
+ *     looked at their own card saw nothing — with no error to explain it.
+ *
+ *   - THE HOST'S PUBLIC PROFILE, DUPLICATED. Bio, spoken languages and the
+ *     operating city are what a traveller reads before booking, and the host
+ *     dashboard has a proper editor for them with a live preview of the card.
+ *     Two editors for one set of fields means two places to look when something
+ *     is wrong. This one now links to that one instead.
+ *
+ *   - CLAIMS THE USER NEVER MADE. The languages list defaulted to "Tiếng Việt
+ *     (Bản địa)" and "English (Fluent)" for every new account. Fluency is a
+ *     claim a traveller acts on; it is not ours to fill in.
+ *
+ * What is left is what an account actually owns: your picture, your name, how
+ * to reach you, and where you are. Four fields, and a line telling a host where
+ * the rest lives.
+ */
 interface UserProfileModalProps {
   isOpen: boolean;
   onClose: () => void;
   user: User | null;
   language: Language;
   onSaveProfile: (updatedUser: User) => void;
+  /** Hosts only: jump to the public-profile editor in the dashboard. */
+  onOpenHostProfile?: () => void;
 }
-
-const VIETNAM_CITIES = [
-  'Hà Nội',
-  'TP. Hồ Chí Minh',
-  'Đà Nẵng',
-  'Hội An',
-  'Huế',
-  'Đà Lạt',
-  'Ninh Bình',
-  'Sa Pa',
-  'Cần Thơ',
-  'Quy Nhơn',
-];
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
@@ -30,310 +56,261 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   user,
   language,
   onSaveProfile,
+  onOpenHostProfile,
 }) => {
   const t = translations[language];
+  const isVi = language === 'vi';
 
-  const [name, setName] = useState<string>(user?.name || '');
-  const [avatar, setAvatar] = useState<string>(user?.avatar || '');
-  const [phone, setPhone] = useState<string>(user?.phone || '');
-  const [city, setCity] = useState<string>(user?.city || 'Hà Nội');
-  const [bioVi, setBioVi] = useState<string>(user?.bioVi || '');
-  const [bioEn, setBioEn] = useState<string>(user?.bioEn || '');
-  const [languages, setLanguages] = useState<string[]>(
-    user?.languages && user.languages.length > 0 ? user.languages : ['Tiếng Việt (Bản địa)', 'English (Fluent)']
-  );
-  const [newLang, setNewLang] = useState<string>('');
-  const [isSaved, setIsSaved] = useState<boolean>(false);
+  const [name, setName] = useState('');
+  const [avatar, setAvatar] = useState('');
+  const [phone, setPhone] = useState('');
+  const [city, setCity] = useState('');
+  const [isSaved, setIsSaved] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
 
-  // Sync state if user changes
-  React.useEffect(() => {
-    if (user) {
-      setName(user.name);
-      setAvatar(user.avatar);
-      setPhone(user.phone || '');
-      setCity(user.city || 'Hà Nội');
-      setBioVi(user.bioVi || '');
-      setBioEn(user.bioEn || '');
-      if (user.languages && user.languages.length > 0) {
-        setLanguages(user.languages);
-      }
-    }
-  }, [user]);
+  useEffect(() => {
+    if (!user) return;
+    setName(user.name);
+    setAvatar(user.avatar);
+    setPhone(user.phone || '');
+    setCity(user.city || '');
+    setUploadError('');
+    setSaving(false);
+  }, [user, isOpen]);
 
   if (!isOpen || !user) return null;
 
-  const handleAddLanguage = () => {
-    if (newLang.trim() && !languages.includes(newLang.trim())) {
-      setLanguages([...languages, newLang.trim()]);
-      setNewLang('');
-      sounds.playTap();
+  const handlePickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // let the same file be re-picked after a failure
+    if (!file) return;
+
+    setUploadError('');
+    // Re-encoded, not merely size-checked: base64 inflates a file by about a
+    // third, and Firestore rejects any document over 1 MiB.
+    const result = await resizeImageFile(file);
+    if (result.status === 'failed') {
+      setUploadError(resizeFailureMessage(result.reason, isVi));
+      return;
     }
+    setAvatar(result.dataUrl);
+    sounds.playNotificationPing();
   };
 
-  const handleRemoveLanguage = (langToRemove: string) => {
-    setLanguages(languages.filter((l) => l !== langToRemove));
-    sounds.playTap();
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const updatedUser: User = {
+    if (saving) return;
+
+    let picture = avatar.trim() || user.avatar;
+
+    // A picture picked off disk is ~35 KB of base64. It goes to its own
+    // document first, and the profile carries only the ~50-byte reference —
+    // otherwise every visitor downloads it with every host card, because the
+    // profiles collection is read whole. See src/utils/avatarStore.ts.
+    if (isInlineImage(picture)) {
+      setSaving(true);
+      setUploadError('');
+      try {
+        picture = await externaliseAvatar(user.id, picture);
+      } catch (err) {
+        console.warn('[ViS-Go] Avatar did not save:', err);
+        setSaving(false);
+        setUploadError(
+          isVi
+            ? 'Chưa lưu được ảnh đại diện. Kiểm tra kết nối rồi thử lại.'
+            : 'The picture could not be saved. Check your connection and try again.',
+        );
+        return;
+      }
+      setSaving(false);
+    }
+
+    onSaveProfile({
       ...user,
       name: name.trim() || user.name,
-      avatar: avatar.trim() || user.avatar,
-      phone: phone.trim() || user.phone,
-      city,
-      bioVi: bioVi.trim(),
-      bioEn: bioEn.trim(),
-      languages,
-    };
-
-    onSaveProfile(updatedUser);
+      avatar: picture,
+      phone: phone.trim(),
+      city: city.trim(),
+    });
     sounds.playSuccessChime();
     setIsSaved(true);
     setTimeout(() => {
       setIsSaved(false);
       onClose();
-    }, 1000);
+    }, 900);
   };
 
-  // Avatar presets for easy 1-click update
-  const AVATAR_PRESETS = [
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-    'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=400&q=80',
-    'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80',
-    'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?auto=format&fit=crop&w=400&q=80',
-  ];
+  const roleLabel =
+    user.role === 'customer' ? t.customerRole : user.role === 'host' ? t.hostRole : t.adminRole;
+
+  const field =
+    'w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-sm text-stone-900 outline-hidden transition-all';
+  const label = 'block text-xs font-bold text-stone-700 mb-1.5';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in overflow-y-auto">
-      <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col my-8">
-        
-        {/* Modal Header */}
-        <div className="bg-gradient-to-r from-[#991B1B] to-[#7F1D1D] px-6 py-5 text-white flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center text-amber-300">
-              <i className="fa-solid fa-user-gear text-lg"></i>
-            </div>
-            <div>
-              <h3 className="font-bold text-lg leading-tight">{t.accountProfile}</h3>
-              <p className="text-xs text-red-100/80">
-                {language === 'vi' ? 'Xem và chỉnh sửa thông tin tài khoản của bạn' : 'View and update your personal profile details'}
-              </p>
-            </div>
-          </div>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-stone-200 overflow-hidden flex flex-col max-h-[92vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header. The subtitle it used to carry ("Xem và chỉnh sửa thông tin
+            tài khoản của bạn") only restated the title. */}
+        <div className="bg-gradient-to-r from-[#991B1B] to-[#7F1D1D] px-5 py-4 text-white flex items-center justify-between shrink-0">
+          <h3 className="font-bold text-base">{t.accountProfile}</h3>
           <button
+            type="button"
             onClick={() => {
               sounds.playTap();
               onClose();
             }}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+            aria-label={isVi ? 'Đóng' : 'Close'}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
           >
             <i className="fa-solid fa-xmark text-sm"></i>
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[75vh] overflow-y-auto">
-          
-          {/* Top Profile Summary Badge */}
-          <div className="flex items-center gap-4 p-4 rounded-2xl bg-[#FAF7F2] border border-stone-200">
-            <div className="relative">
-              <img
+        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto">
+          {/* Picture, and the two things about this account nobody can edit
+              here. Email and role used to be repeated in a summary card that
+              sat above fields showing the very same name and city. */}
+          <div className="flex items-center gap-4">
+            <div className="relative shrink-0">
+              <Avatar
                 src={avatar || user.avatar}
-                alt={name}
-                className="w-16 h-16 rounded-full object-cover border-2 border-[#D4AF37] shadow-sm"
+                name={name || user.name}
+                className="w-16 h-16 rounded-full object-cover border-2 border-[#D4AF37] bg-stone-100"
               />
               {user.verified && (
-                <span className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white shadow-xs" title="100% eKYC Verified">
-                  ✓
+                <span
+                  title={isVi ? 'Đã xác minh' : 'Verified'}
+                  className="absolute -bottom-0.5 -right-0.5 bg-emerald-600 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center border-2 border-white"
+                >
+                  <i className="fa-solid fa-check text-[9px]"></i>
                 </span>
               )}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-stone-900 text-base truncate">{name || user.name}</h4>
+
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 mb-1">
                 <span className="px-2 py-0.5 bg-amber-100 text-amber-900 text-[10px] font-bold uppercase rounded-md border border-amber-300">
-                  {user.role === 'customer' ? t.customerRole : user.role === 'host' ? t.hostRole : t.adminRole}
+                  {roleLabel}
                 </span>
               </div>
-              <p className="text-xs text-stone-500 truncate">{user.email}</p>
-              <p className="text-[11px] text-stone-400 mt-0.5 flex items-center gap-1">
-                <i className="fa-solid fa-location-dot text-red-700 text-[10px]"></i>
-                <span>{city}</span>
-                <span>•</span>
-                <span>ID: #{user.id}</span>
-              </p>
-            </div>
-          </div>
-
-          {/* Avatar URL & Preset Selector */}
-          <div>
-            <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-              {t.avatarUrlLabel}
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="url"
-                value={avatar}
-                onChange={(e) => setAvatar(e.target.value)}
-                placeholder="https://..."
-                className="flex-1 px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs"
-              />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <span className="text-[11px] text-stone-500 font-medium">
-                {language === 'vi' ? 'Chọn nhanh ảnh mẫu:' : 'Quick avatar presets:'}
-              </span>
-              <div className="flex gap-1.5">
-                {AVATAR_PRESETS.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => {
-                      setAvatar(preset);
-                      sounds.playTap();
-                    }}
-                    className={`w-7 h-7 rounded-full overflow-hidden border-2 transition-all cursor-pointer ${
-                      avatar === preset ? 'border-[#991B1B] scale-110' : 'border-stone-300 opacity-70 hover:opacity-100'
-                    }`}
-                  >
-                    <img src={preset} alt="" className="w-full h-full object-cover" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Full Name & Phone Number */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-                {language === 'vi' ? 'Họ và tên đầy đủ' : 'Full Name'} *
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs font-semibold"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-                {t.phoneLabel}
-              </label>
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+84 90..."
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs"
-              />
-            </div>
-          </div>
-
-          {/* City Selection */}
-          <div>
-            <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-              {t.cityLabel}
-            </label>
-            <select
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 bg-white focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs font-medium"
-            >
-              {VIETNAM_CITIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Languages Spoken */}
-          <div>
-            <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-              {t.languagesProficient}
-            </label>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {languages.map((langItem) => (
-                <span
-                  key={langItem}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-full text-xs font-medium"
+              <p className="text-xs text-stone-500 truncate mb-1.5">{user.email}</p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  className="text-xs font-bold text-[#991B1B] hover:underline cursor-pointer"
                 >
-                  <i className="fa-solid fa-comments text-amber-600 text-[10px]"></i>
-                  {langItem}
+                  {isVi ? 'Đổi ảnh' : 'Change photo'}
+                </button>
+                {avatar !== user.avatar && (
                   <button
                     type="button"
-                    onClick={() => handleRemoveLanguage(langItem)}
-                    className="text-stone-400 hover:text-red-600 ml-1 cursor-pointer"
+                    onClick={() => setAvatar(user.avatar)}
+                    className="text-xs font-semibold text-stone-500 hover:text-stone-800 cursor-pointer"
                   >
-                    ×
+                    {isVi ? 'Hoàn tác' : 'Undo'}
                   </button>
-                </span>
-              ))}
-            </div>
-            <div className="flex gap-2">
+                )}
+              </div>
               <input
-                type="text"
-                value={newLang}
-                onChange={(e) => setNewLang(e.target.value)}
-                placeholder={
-                  language === 'vi'
-                    ? 'VD: Tiếng Pháp (Giao tiếp), Tiếng Hàn, Tiếng Nhật...'
-                    : 'E.g. French (Conversational), Korean, Japanese...'
-                }
-                className="flex-1 px-3.5 py-2 rounded-xl border border-stone-300 text-xs"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleAddLanguage();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleAddLanguage}
-                className="px-3.5 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-bold rounded-xl border border-stone-200 transition-colors cursor-pointer"
-              >
-                {language === 'vi' ? '+ Thêm' : '+ Add'}
-              </button>
-            </div>
-          </div>
-
-          {/* Short Bio (Vietnamese & English) */}
-          <div className="space-y-3 pt-2 border-t border-stone-100">
-            <div>
-              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-                {t.bioLabelVi}
-              </label>
-              <textarea
-                rows={2}
-                value={bioVi}
-                onChange={(e) => setBioVi(e.target.value)}
-                placeholder={t.bioPlaceholderVi}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs leading-relaxed"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1.5">
-                {t.bioLabelEn}
-              </label>
-              <textarea
-                rows={2}
-                value={bioEn}
-                onChange={(e) => setBioEn(e.target.value)}
-                placeholder={t.bioPlaceholderEn}
-                className="w-full px-3.5 py-2.5 rounded-xl border border-stone-300 focus:border-[#991B1B] focus:ring-1 focus:ring-[#991B1B] text-xs leading-relaxed"
+                ref={fileInput}
+                type="file"
+                accept="image/*"
+                onChange={handlePickFile}
+                className="hidden"
               />
             </div>
           </div>
 
-          {/* Save Status Banner */}
+          {uploadError && (
+            <p className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2 leading-relaxed">
+              {uploadError}
+            </p>
+          )}
+
+          <div>
+            <label className={label} htmlFor="profile-name">
+              {isVi ? 'Họ và tên' : 'Full name'} <span className="text-red-600">*</span>
+            </label>
+            <input
+              id="profile-name"
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={field}
+            />
+          </div>
+
+          <div>
+            <label className={label} htmlFor="profile-phone">
+              {isVi ? 'Số điện thoại' : 'Phone number'}
+              <span className="font-normal text-stone-400"> ({isVi ? 'không bắt buộc' : 'optional'})</span>
+            </label>
+            <input
+              id="profile-phone"
+              type="tel"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              placeholder="+84 90 123 4567"
+              className={field}
+            />
+          </div>
+
+          <div>
+            <label className={label} htmlFor="profile-city">
+              {user.role === 'host'
+                ? isVi ? 'Thành phố bạn dẫn tour' : 'City you host in'
+                : isVi ? 'Bạn đang ở đâu' : 'Where you are'}
+              <span className="font-normal text-stone-400"> ({isVi ? 'không bắt buộc' : 'optional'})</span>
+            </label>
+            {/* Was a dropdown of eight cities, so most of Vietnam had no answer. */}
+            <ProvinceSelect
+              id="profile-city"
+              value={city}
+              onChange={(next) => setCity(next)}
+              language={language}
+              className={`${field} pl-9 pr-8`}
+            />
+          </div>
+
+          {/* One line instead of four duplicated fields. */}
+          {user.role === 'host' && onOpenHostProfile && (
+            <button
+              type="button"
+              onClick={() => {
+                sounds.playTap();
+                onClose();
+                onOpenHostProfile();
+              }}
+              className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl border border-stone-200 bg-stone-50 hover:bg-stone-100 transition-colors cursor-pointer text-left"
+            >
+              <span className="flex items-center gap-3 min-w-0">
+                <i className="fa-solid fa-address-card text-[#D4AF37]"></i>
+                <span className="min-w-0">
+                  <span className="block text-xs font-bold text-stone-900">
+                    {isVi ? 'Hồ sơ Host công khai' : 'Public host profile'}
+                  </span>
+                  <span className="block text-[11px] text-stone-500 leading-snug">
+                    {isVi
+                      ? 'Giới thiệu, ngôn ngữ, thế mạnh — những gì khách đọc trước khi đặt'
+                      : 'Bio, languages, specialities — what a traveller reads before booking'}
+                  </span>
+                </span>
+              </span>
+              <i className="fa-solid fa-angle-right text-stone-300 text-xs shrink-0"></i>
+            </button>
+          )}
+
           {isSaved && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-in fade-in">
               <i className="fa-solid fa-circle-check text-emerald-600"></i>
@@ -341,8 +318,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100">
+          <div className="flex items-center justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={() => {
@@ -351,14 +327,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               }}
               className="px-4 py-2.5 text-xs font-bold text-stone-600 hover:text-stone-900 rounded-xl transition-colors cursor-pointer"
             >
-              {language === 'vi' ? 'Hủy' : 'Cancel'}
+              {isVi ? 'Hủy' : 'Cancel'}
             </button>
             <button
               type="submit"
-              className="px-6 py-2.5 bg-[#991B1B] hover:bg-[#7F1D1D] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2"
+              disabled={saving}
+              className="px-5 py-2.5 bg-[#991B1B] hover:bg-[#7F1D1D] disabled:bg-stone-400 disabled:cursor-wait text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
             >
-              <i className="fa-solid fa-check text-xs"></i>
-              {language === 'vi' ? 'Lưu Thông Tin Tài Khoản' : 'Save Account Profile'}
+              {saving
+                ? isVi ? 'Đang tải ảnh…' : 'Uploading…'
+                : isVi ? 'Lưu' : 'Save'}
             </button>
           </div>
         </form>

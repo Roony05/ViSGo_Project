@@ -1,7 +1,9 @@
 import React from 'react';
-import { User, Language, UserRole } from '../types';
+import { User, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { LacBird } from './brand/LacBird';
+import { Avatar } from './Avatar';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -18,7 +20,6 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenProfile: () => void;
   onOpenAuth: (tab: 'login' | 'register') => void;
-  onRoleSwitch: (role: UserRole) => void;
   onLogout: () => void;
 }
 
@@ -37,7 +38,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenSettings,
   onOpenProfile,
   onOpenAuth,
-  onRoleSwitch,
   onLogout,
 }) => {
   const isVi = language === 'vi';
@@ -71,34 +71,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={() => handleNavClick('explore')}
             className="flex items-center gap-2.5 cursor-pointer group"
           >
-            <div className="w-8 h-8 rounded-xl bg-[#991B1B] border border-[#D4AF37]/40 flex items-center justify-center text-[#D4AF37] font-black text-base shadow-sm group-hover:scale-105 transition-transform">
-              V
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 leading-none">
-                <span className="font-black text-lg text-white tracking-tight">ViS-Go</span>
-                <span className="px-1 py-0.2 bg-[#D4AF37] text-stone-950 text-[8px] font-black rounded uppercase">
-                  VN
-                </span>
-              </div>
-            </div>
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#991B1B] border border-[#D4AF37]/40 shadow-sm transition-transform group-hover:scale-105">
+              <LacBird className="w-5 h-auto" color="#D4AF37" />
+            </span>
+            <span className="font-black text-lg text-white tracking-tight leading-none">ViS-Go</span>
           </div>
 
+          {/*
+            Settings used to be reachable from three places at once: this gear,
+            the entry at the foot of this panel, and the account dropdown in the
+            header. One labelled entry, at the foot of the sidebar, is enough.
+          */}
           <div className="flex items-center gap-1">
-            {/* Gear Icon for Quick Settings */}
-            <button
-              onClick={() => {
-                sounds.playTap();
-                onOpenSettings();
-                onClose();
-              }}
-              className="w-8 h-8 rounded-lg bg-stone-800/80 hover:bg-stone-700 text-stone-300 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
-              title={t.settings}
-              aria-label={t.settings}
-            >
-              <i className="fa-solid fa-gear text-xs"></i>
-            </button>
-
             {/* Close button */}
             <button
               onClick={onClose}
@@ -124,7 +108,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer group"
               >
                 <div className="w-9 h-9 rounded-full border border-[#D4AF37]/60 overflow-hidden bg-stone-700 shrink-0">
-                  <img src={activeUser.avatar} alt="" className="w-full h-full object-cover" />
+                  <Avatar src={activeUser.avatar} name={activeUser.name} className="w-full h-full object-cover" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1">
@@ -220,7 +204,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <i className="fa-solid fa-angle-right text-[10px] opacity-50"></i>
           </button>
 
-          {/* 2. My Bookings */}
+          {/* 2. VR Heritage */}
+          <button
+            onClick={() => handleNavClick('vr-heritage')}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'vr-heritage'
+                ? 'bg-[#991B1B] text-white shadow-sm'
+                : 'text-stone-300 hover:bg-stone-800/80 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <i className="fa-solid fa-vr-cardboard text-sm text-[#D4AF37]"></i>
+              <span>{isVi ? 'Di sản VR 360°' : 'VR Heritage 360°'}</span>
+            </div>
+            <span className="px-1.5 py-0.5 bg-[#D4AF37] text-stone-950 font-black text-[9px] rounded-full tracking-wide">
+              NEW
+            </span>
+          </button>
+
+          {/* 3. ViS-AI assistant.
+                 `onOpenAIChat` was passed into this component and destructured
+                 and then never used — the sidebar had no way to reach the
+                 assistant at all. It is a route now, so it belongs in the list
+                 with the other routes and highlights like them. */}
+          <button
+            onClick={() => {
+              onOpenAIChat();
+              onClose();
+            }}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'ai-assistant'
+                ? 'bg-[#991B1B] text-white shadow-sm'
+                : 'text-stone-300 hover:bg-stone-800/80 hover:text-white'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <i className="fa-solid fa-wand-magic-sparkles text-sm text-[#D4AF37]"></i>
+              <span>{isVi ? 'Trợ lý ViS-AI' : 'ViS-AI Assistant'}</span>
+            </div>
+            <i className="fa-solid fa-angle-right text-[10px] opacity-50"></i>
+          </button>
+
+          {/* 4. My Bookings — a traveller's own trips. A host sees incoming
+                 trips in the dashboard; an admin has none. */}
+          {activeUser?.role === 'customer' && (
           <button
             onClick={() => handleNavClick('my-bookings')}
             className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -239,8 +266,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             )}
           </button>
+          )}
 
-          {/* 3. Live GPS Radar */}
+          {/* 5. Live GPS Radar and 6. Messages both hang off a booking, so they
+                 are for the two people on a trip. An admin reviews trips and
+                 conversations inside the Admin Hub instead. */}
+          {(activeUser?.role === 'customer' || activeUser?.role === 'host') && (
+          <>
           <button
             onClick={() => {
               sounds.playTap();
@@ -270,10 +302,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>{isVi ? 'Tin nhắn' : 'Messages'}</span>
             </div>
           </button>
+          </>
+          )}
 
-          {/* Host & Admin Studio Section (Only shown when relevant role) */}
+          {/* The one entry that belongs to this account's role, and nothing
+              from the other two. */}
           {(activeUser?.role === 'host' || activeUser?.role === 'admin') && (
             <div className="pt-2 mt-2 border-t border-stone-800/60 space-y-1">
+              {activeUser?.role === 'host' && (
               <button
                 onClick={() => handleNavClick('host-studio')}
                 className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
@@ -288,6 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <i className="fa-solid fa-angle-right text-[10px] opacity-50"></i>
               </button>
+              )}
 
               {activeUser?.role === 'admin' && (
                 <button
@@ -309,63 +346,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* Streamlined Footer: Role Switch & Quick Info */}
+        {/* Footer: language, currency, settings. */}
         <div className="p-3 border-t border-stone-800/80 bg-stone-950/40 space-y-2 shrink-0">
-          {/* Compact Role Switcher */}
-          {activeUser && (
-            <div className="flex items-center gap-1 p-1 bg-stone-800/60 rounded-xl">
-              <button
-                onClick={() => {
-                  sounds.playTap();
-                  onRoleSwitch('customer');
-                }}
-                className={`flex-1 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer text-center ${
-                  activeUser.role === 'customer'
-                    ? 'bg-[#991B1B] text-white shadow-xs'
-                    : 'text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                {isVi ? 'Khách' : 'Guest'}
-              </button>
-              <button
-                onClick={() => {
-                  sounds.playTap();
-                  onRoleSwitch('host');
-                }}
-                className={`flex-1 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer text-center ${
-                  activeUser.role === 'host'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                Host
-              </button>
-              <button
-                onClick={() => {
-                  sounds.playTap();
-                  onRoleSwitch('admin');
-                }}
-                className={`flex-1 py-1 text-[10px] font-bold rounded-lg transition-colors cursor-pointer text-center ${
-                  activeUser.role === 'admin'
-                    ? 'bg-stone-700 text-amber-300 shadow-xs'
-                    : 'text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                Admin
-              </button>
-            </div>
-          )}
-
           {/* Quick Settings & Currency Info */}
           <div className="flex items-center justify-between text-[10px] text-stone-400 px-1 pt-0.5">
-            <span>{isVi ? '🇻🇳 Tiếng Việt' : '🇬🇧 English'} • {currency}</span>
+            <span>{isVi ? 'Tiếng Việt' : 'English'} • {currency}</span>
             <button
               onClick={() => {
                 sounds.playTap();
                 onOpenSettings();
                 onClose();
               }}
-              className="hover:text-amber-400 transition-colors flex items-center gap-1 cursor-pointer"
+              /* `-my-1.5` cancelled the padding it was given, leaving a 27px
+                 target. Keep the padding; the row has space for it. */
+              className="hover:text-amber-400 transition-colors flex min-h-9 items-center gap-1.5 cursor-pointer px-1 py-2 rounded-lg hover:bg-stone-800/60"
             >
               <i className="fa-solid fa-gear text-[10px]"></i>
               <span>{t.settings}</span>

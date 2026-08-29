@@ -1,11 +1,32 @@
-import { Tour, User, Booking, HostKycApplication, TourReview } from '../types';
+/**
+ * The starting dataset for a fresh ViS-Go database.
+ *
+ * THIS FILE IS NOT PART OF THE APP. Nothing under `src/` may import it, and
+ * `npm run build` must never pull it into a bundle. It exists for exactly one
+ * consumer: `scripts/seed-firestore.ts`, which runs on your machine and copies
+ * these rows into Firestore once. After that, Firestore is the data — the app
+ * reads and writes there and never looks here again.
+ *
+ * That separation is the whole point. These rows carry email addresses, phone
+ * numbers, meeting points and identity documents of the demo accounts. While
+ * this lived in `src/data/mockData.ts` and was imported by `storage.ts` as an
+ * offline fallback, every one of those values was shipped to every visitor and
+ * readable with F12 — including the demo passwords, which is how someone would
+ * have found their way into the admin account.
+ *
+ * So: no passwords here either. The seeder takes those from SEED_PASSWORD and
+ * SEED_ADMIN_PASSWORD in `.env`, which has no VITE_ prefix and therefore cannot
+ * reach the browser. Editing a row here changes nothing until you re-run
+ * `npm run seed`.
+ */
+
+import { Tour, User, Booking, HostKycApplication, LocalVideo, TourReview } from '../src/types';
 
 export const INITIAL_USERS: User[] = [
   {
     id: 'user_cust_1',
     name: 'Sarah Jenkins',
     email: 'customer@visgo.vn',
-    password: 'password123',
     role: 'customer',
     phone: '+84 901 234 567',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
@@ -22,7 +43,6 @@ export const INITIAL_USERS: User[] = [
     id: 'user_host_1',
     name: 'Nguyễn Minh Tuấn (Tommy)',
     email: 'host@visgo.vn',
-    password: 'password123',
     role: 'host',
     phone: '+84 912 345 678',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
@@ -46,7 +66,6 @@ export const INITIAL_USERS: User[] = [
     id: 'user_host_2',
     name: 'Trần Thị Mai Linh',
     email: 'linh.host@visgo.vn',
-    password: 'password123',
     role: 'host',
     phone: '+84 933 456 789',
     avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=150&auto=format&fit=crop&q=80',
@@ -67,15 +86,113 @@ export const INITIAL_USERS: User[] = [
     currentLng: 106.6653,
   },
   {
+    id: 'user_host_3',
+    name: 'Lê Văn Hoàng',
+    email: 'hoang.host@visgo.vn',
+    role: 'host',
+    phone: '+84 905 112 233',
+    // No photograph, deliberately. The four hosts below used to be names on a
+    // tour with no account behind them, and the stock portraits the catalogue
+    // gave them were photographs of real strangers standing in as identities.
+    // <Avatar> draws initials instead; each of these accounts can upload a real
+    // picture by signing in.
+    avatar: '',
+    bio: 'Da Nang fisherman\u2019s son turned coastal guide. I know which boats land at which hour, which stretch of Son Tra the monkeys come down to at dusk, and where the Dragon Bridge is best watched from.',
+    bioVi: 'Con trai một gia đình ngư dân Đà Nẵng, giờ dẫn tour ven biển. Mình biết thuyền nào cập bến giờ nào, đoạn nào ở Sơn Trà đàn voọc hay xuống lúc chiều muộn, và chỗ ngắm Cầu Rồng phun lửa đẹp nhất.',
+    tagline: 'Coastal Da Nang, from the fish market to the Son Tra ridge.',
+    taglineVi: 'Đà Nẵng ven biển, từ chợ cá tới đỉnh Sơn Trà.',
+    languages: ['Tiếng Việt', 'English'],
+    specialties: ['Seafood', 'Son Tra Peninsula', 'Dragon Bridge'],
+    city: 'Đà Nẵng',
+    verified: true,
+    rating: 4.97,
+    reviewCount: 88,
+    totalEarnings: 21600000,
+    completedTours: 46,
+    isAcceptingGuests: true,
+    currentLat: 16.0678,
+    currentLng: 108.2208,
+  },
+  {
+    id: 'user_host_4',
+    name: 'Võ Minh Châu',
+    email: 'chau.host@visgo.vn',
+    role: 'host',
+    phone: '+84 905 889 900',
+    avatar: '',
+    bio: 'Third-generation silk lantern maker in Hoi An. My grandmother taught me the bamboo frame; I will teach you in an afternoon, and we eat a herb-garden vegetarian meal after.',
+    bioVi: 'Đời thứ ba làm đèn lồng lụa ở Hội An. Bà ngoại dạy mình cách vót khung tre; mình sẽ chỉ lại cho bạn trong một buổi chiều, xong cùng ăn cơm chay bên vườn thảo mộc.',
+    tagline: 'Hoi An lantern workshop, and a quiet herb-garden meal.',
+    taglineVi: 'Xưởng đèn lồng Hội An và bữa cơm chay bên vườn thảo mộc.',
+    languages: ['Tiếng Việt', 'English'],
+    specialties: ['Silk Lanterns', 'Craft Workshops', 'Vegetarian Cooking'],
+    city: 'Hội An',
+    verified: true,
+    rating: 4.99,
+    reviewCount: 110,
+    totalEarnings: 26900000,
+    completedTours: 58,
+    isAcceptingGuests: true,
+    currentLat: 15.8801,
+    currentLng: 108.3380,
+  },
+  {
+    id: 'user_host_5',
+    name: 'Đặng Quốc Bảo',
+    email: 'bao.host@visgo.vn',
+    role: 'host',
+    phone: '+84 963 221 144',
+    avatar: '',
+    bio: 'I grew up between the pine hills and the greenhouses of Da Lat. Coffee farms in the morning, waterfalls nobody queues for in the afternoon, and the cold you did not pack for.',
+    bioVi: 'Mình lớn lên giữa đồi thông và nhà kính Đà Lạt. Sáng đi vườn cà phê, chiều tới thác không phải xếp hàng, và cái lạnh mà bạn chắc chắn quên mang áo.',
+    tagline: 'Da Lat pine hills, coffee farms and quiet waterfalls.',
+    taglineVi: 'Đồi thông Đà Lạt, vườn cà phê và những con thác vắng người.',
+    languages: ['Tiếng Việt', 'English'],
+    specialties: ['Coffee Farms', 'Waterfalls', 'Nature Trek'],
+    city: 'Đà Lạt',
+    verified: true,
+    rating: 4.96,
+    reviewCount: 75,
+    totalEarnings: 18300000,
+    completedTours: 39,
+    isAcceptingGuests: true,
+    currentLat: 11.9404,
+    currentLng: 108.4583,
+  },
+  {
+    id: 'user_host_6',
+    name: 'Nguyễn Phước Bảo Trí',
+    email: 'tri.host@visgo.vn',
+    role: 'host',
+    phone: '+84 914 556 789',
+    avatar: '',
+    bio: 'Hue born, and descended from the Nguyen line the city is named for. Royal cuisine, the citadel at the hours nobody visits, and a boat on the Perfume River at dusk.',
+    bioVi: 'Sinh ra ở Huế, thuộc dòng Nguyễn Phước. Ẩm thực cung đình, Đại Nội vào những giờ không ai ghé, và một chuyến đò trên sông Hương lúc chiều buông.',
+    tagline: 'Hue royal cuisine and the citadel when it is empty.',
+    taglineVi: 'Ẩm thực cung đình Huế và Đại Nội lúc vắng người.',
+    languages: ['Tiếng Việt', 'English'],
+    specialties: ['Royal Cuisine', 'Imperial Citadel', 'Perfume River'],
+    city: 'Huế',
+    // Not verified yet: this host's identity declaration is still in the admin
+    // queue, which is what keeps that screen showing a real pending case.
+    verified: false,
+    rating: 4.98,
+    reviewCount: 64,
+    totalEarnings: 15200000,
+    completedTours: 31,
+    isAcceptingGuests: true,
+    currentLat: 16.4637,
+    currentLng: 107.5909,
+  },
+  {
     id: 'user_admin_1',
     name: 'ViS-Go Operations Center',
     email: 'admin@visgo.vn',
-    password: 'password123',
     role: 'admin',
     phone: '+84 24 3999 8888',
     avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80',
     bio: 'Platform Trust & Safety Administrator with 24/7 host verification and guest support.',
-    bioVi: 'Trung tâm Vận hành An toàn & Xác thực eKYC ViS-Go 24/7.',
+    bioVi: 'Trung tâm Vận hành An toàn & Xác minh Danh tính ViS-Go 24/7.',
     languages: ['Tiếng Việt', 'English'],
     city: 'Hà Nội',
     verified: true,
@@ -269,9 +386,9 @@ export const INITIAL_TOURS: Tour[] = [
   },
   {
     id: 'tour_dn_03',
-    hostId: 'user_host_1',
+    hostId: 'user_host_3',
     hostName: 'Lê Văn Hoàng',
-    hostAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+    hostAvatar: '',
     hostPhone: '+84 905 112 233',
     hostRating: 4.97,
     hostReviewCount: 88,
@@ -350,9 +467,9 @@ export const INITIAL_TOURS: Tour[] = [
   },
   {
     id: 'tour_ha_04',
-    hostId: 'user_host_2',
+    hostId: 'user_host_4',
     hostName: 'Võ Minh Châu',
-    hostAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+    hostAvatar: '',
     hostPhone: '+84 905 889 900',
     hostRating: 4.99,
     hostReviewCount: 110,
@@ -431,9 +548,9 @@ export const INITIAL_TOURS: Tour[] = [
   },
   {
     id: 'tour_dl_05',
-    hostId: 'user_host_1',
+    hostId: 'user_host_5',
     hostName: 'Đặng Quốc Bảo',
-    hostAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
+    hostAvatar: '',
     hostPhone: '+84 963 221 144',
     hostRating: 4.96,
     hostReviewCount: 75,
@@ -512,13 +629,13 @@ export const INITIAL_TOURS: Tour[] = [
   },
   {
     id: 'tour_hue_06',
-    hostId: 'user_host_2',
+    hostId: 'user_host_6',
     hostName: 'Nguyễn Phước Bảo Trí',
-    hostAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
+    hostAvatar: '',
     hostPhone: '+84 914 556 789',
     hostRating: 4.98,
     hostReviewCount: 64,
-    hostVerified: true,
+    hostVerified: false,
     title: 'Hue Imperial Citadel Secrets & Royal Court Culinary Masterclass',
     titleVi: 'Huế: Bí Ẩn Đại Nội Hoàng Thành & Nghệ Thuật Ẩm Thực Cung Đình',
     tagline: 'Discover imperial palace intrigues and dine inside a royal descendant garden house.',
@@ -589,7 +706,7 @@ export const INITIAL_REVIEWS: TourReview[] = [
     userId: 'user_alex',
     userName: 'Alexander Wright',
     userAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&auto=format&fit=crop&q=80',
-    userCountry: 'Australia 🇦🇺',
+    userCountry: 'Australia',
     rating: 5,
     date: '2026-08-10',
     comment: 'Tommy was the highlight of our Vietnam trip! Riding on the vintage scooter through the bustling Old Quarter was exhilarating yet completely safe. The hidden egg coffee shop was incredible.',
@@ -601,7 +718,7 @@ export const INITIAL_REVIEWS: TourReview[] = [
     userId: 'user_charlotte',
     userName: 'Charlotte Dubois',
     userAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80',
-    userCountry: 'France 🇫🇷',
+    userCountry: 'France',
     rating: 5,
     date: '2026-08-04',
     comment: 'The night pho and the walk on Long Bien Bridge under the stars gave me chills. Tommy treats you like his oldest friend returning home. 100% recommended!',
@@ -613,7 +730,7 @@ export const INITIAL_REVIEWS: TourReview[] = [
     userId: 'user_kenji',
     userName: 'Kenji Takahashi',
     userAvatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&auto=format&fit=crop&q=80',
-    userCountry: 'Japan 🇯🇵',
+    userCountry: 'Japan',
     rating: 5,
     date: '2026-08-02',
     comment: 'Mai Linh’s deep knowledge of Chinatown heritage and Taoist temples was fascinating. The dim sum in the secret alley was the best I have ever tasted in Southeast Asia.',
@@ -644,7 +761,6 @@ export const INITIAL_BOOKINGS: Booking[] = [
     totalPriceUSD: 52,
     platformFeeVND: 195000,
     status: 'confirmed',
-    paymentMethod: 'card',
     createdAt: '2026-08-16',
     notes: 'No pork for one guest if possible, beef is great!',
     hasReviewed: false,
@@ -672,7 +788,6 @@ export const INITIAL_BOOKINGS: Booking[] = [
     totalPriceUSD: 24,
     platformFeeVND: 88500,
     status: 'confirmed',
-    paymentMethod: 'vnpay',
     createdAt: '2026-08-17',
     notes: 'Excited to take cultural street photos!',
     hasReviewed: false,
@@ -680,70 +795,181 @@ export const INITIAL_BOOKINGS: Booking[] = [
   }
 ];
 
+/**
+ * One declaration per host, because a host may not publish without one.
+ *
+ * These used to name `user_applicant_1` and `user_applicant_2` — two ids with
+ * no account, no profile and no tour behind them. The queue looked busy and
+ * referred to nobody, while the six hosts who had actually published had
+ * declared nothing.
+ *
+ * The citizen ID numbers are structurally correct rather than real: twelve
+ * digits, opening with the province code of where the host lives (001 Hà Nội,
+ * 079 TP.HCM, 048 Đà Nẵng, 049 Quảng Nam, 068 Lâm Đồng, 046 Huế), then a
+ * gender-and-century digit and the last two digits of the birth year.
+ */
 export const INITIAL_HOST_KYC: HostKycApplication[] = [
   {
-    id: 'kyc_app_01',
-    hostId: 'user_applicant_1',
-    hostName: 'Phạm Đức Duy',
-    hostEmail: 'duy.pham@gmail.com',
-    hostPhone: '+84 988 776 554',
-    city: 'Hà Nội',
-    idCardFront: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&auto=format&fit=crop&q=80',
-    idCardBack: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&auto=format&fit=crop&q=80',
-    selfieWithId: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=400&auto=format&fit=crop&q=80',
-    criminalRecordStatus: 'clean',
-    identityMatchScore: 98.4,
-    languageCert: 'IELTS 7.5 & Licensed Tourism Guide',
-    experienceYears: 4,
-    submittedDate: '2026-08-16',
-    status: 'pending'
+    id: 'kyc_host_1',
+    hostId: 'user_host_1',
+    fullName: 'Nguyễn Minh Tuấn',
+    cccdNumber: '001091000123',
+    dateOfBirth: '1991-06-14',
+    nationality: 'Việt Nam',
+    address: 'Số 18, ngõ 41 phố Hàng Bồ, phường Hoàn Kiếm, Hà Nội',
+    submittedDate: '2026-07-02',
+    status: 'approved',
   },
   {
-    id: 'kyc_app_02',
-    hostId: 'user_applicant_2',
-    hostName: 'Nguyễn Thị Bích Ngọc',
-    hostEmail: 'bichngoc.dalat@gmail.com',
-    hostPhone: '+84 977 112 334',
-    city: 'Đà Lạt',
-    idCardFront: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&auto=format&fit=crop&q=80',
-    idCardBack: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=400&auto=format&fit=crop&q=80',
-    selfieWithId: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&auto=format&fit=crop&q=80',
-    criminalRecordStatus: 'clean',
-    identityMatchScore: 99.1,
-    languageCert: 'TOEIC 920 & Botanical Specialist',
-    experienceYears: 3,
-    submittedDate: '2026-08-15',
-    status: 'approved'
-  }
+    id: 'kyc_host_2',
+    hostId: 'user_host_2',
+    fullName: 'Trần Thị Mai Linh',
+    cccdNumber: '079193004567',
+    dateOfBirth: '1993-11-03',
+    nationality: 'Việt Nam',
+    address: 'Số 112 đường Trần Hưng Đạo, phường Chợ Quán, TP. Hồ Chí Minh',
+    submittedDate: '2026-07-09',
+    status: 'approved',
+  },
+  {
+    id: 'kyc_host_3',
+    hostId: 'user_host_3',
+    fullName: 'Lê Văn Hoàng',
+    cccdNumber: '048088001122',
+    dateOfBirth: '1988-02-27',
+    nationality: 'Việt Nam',
+    address: 'Số 7 đường Hoàng Sa, phường Sơn Trà, Đà Nẵng',
+    submittedDate: '2026-07-15',
+    status: 'approved',
+  },
+  {
+    id: 'kyc_host_4',
+    hostId: 'user_host_4',
+    fullName: 'Võ Minh Châu',
+    cccdNumber: '049192003344',
+    dateOfBirth: '1992-09-08',
+    nationality: 'Việt Nam',
+    address: 'Số 23 đường Trần Phú, phường Hội An, Đà Nẵng',
+    submittedDate: '2026-07-21',
+    status: 'approved',
+  },
+  {
+    id: 'kyc_host_5',
+    hostId: 'user_host_5',
+    fullName: 'Đặng Quốc Bảo',
+    cccdNumber: '068090005566',
+    dateOfBirth: '1990-04-19',
+    nationality: 'Việt Nam',
+    address: 'Số 5B đường Trần Hưng Đạo, phường Xuân Hương, Lâm Đồng',
+    submittedDate: '2026-08-04',
+    status: 'approved',
+  },
+  {
+    // Still waiting, on purpose: it is what keeps the admin review queue
+    // showing a real case, and it is why this host's profile is not verified.
+    id: 'kyc_host_6',
+    hostId: 'user_host_6',
+    fullName: 'Nguyễn Phước Bảo Trí',
+    cccdNumber: '046095007788',
+    dateOfBirth: '1995-12-01',
+    nationality: 'Việt Nam',
+    address: 'Số 9 đường Lê Lợi, phường Thuận Hóa, Huế',
+    submittedDate: '2026-08-24',
+    status: 'pending',
+  },
 ];
 
-export const CURATED_VIETNAM_IMAGES = [
+/**
+ * Local intro videos, one per destination.
+ *
+ * Every id below was checked against YouTube before it was written here — the
+ * previous list of "curated" videos shipped eight invented ids, and every one
+ * of them rendered a play button over a video that has never existed.
+ * `npm run test:youtube` keeps the check honest, and the admin form now refuses
+ * a link YouTube does not have.
+ *
+ * These belong to their creators; ViS-Go embeds them, exactly as any site may,
+ * and every card carries a link out to the video's own page.
+ */
+export const INITIAL_LOCAL_VIDEOS: LocalVideo[] = [
   {
-    label: 'Hanoi Night Alley & Street Food',
-    url: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_hanoi',
+    city: 'Hà Nội',
+    url: 'https://www.youtube.com/watch?v=SPaE-T5w16g',
+    title: 'Places to visit in North Vietnam — Hanoi, Ninh Binh & beyond',
+    titleVi: 'Miền Bắc có gì: Hà Nội, Ninh Bình và những nơi nên đi',
+    order: 1,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Hoi An Ancient Lanterns',
-    url: 'https://images.unsplash.com/photo-1528127269322-539801943592?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_saigon',
+    city: 'TP. Hồ Chí Minh',
+    url: 'https://www.youtube.com/watch?v=rbNZbC2IqLs',
+    title: 'Best things to do in Vietnam — 4K travel guide',
+    titleVi: 'Việt Nam nên đi đâu, làm gì — cẩm nang quay 4K',
+    order: 2,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Saigon Vibrant Rooftops & Bridges',
-    url: 'https://images.unsplash.com/photo-1583417319070-4a69db38a482?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_danang',
+    city: 'Đà Nẵng',
+    url: 'https://www.youtube.com/watch?v=T4IcTq9YQ8Y',
+    title: 'The ultimate Da Nang travel guide',
+    titleVi: 'Đà Nẵng: cẩm nang khám phá đầy đủ',
+    order: 3,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Da Nang Dragon Bridge & Coast',
-    url: 'https://images.unsplash.com/photo-1559592413-7cec4d0cae2b?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_hoian',
+    city: 'Hội An',
+    url: 'https://www.youtube.com/watch?v=dMPGfnRipUA',
+    title: 'Hoi An, Da Nang & the Hai Van Pass',
+    titleVi: 'Hội An, Đà Nẵng và cung đèo Hải Vân',
+    order: 4,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Da Lat Misty Pine Ridge',
-    url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_hue',
+    city: 'Huế',
+    url: 'https://www.youtube.com/watch?v=FzvENi0U0-w',
+    title: 'Central Vietnam in six days — Da Nang, Hoi An & Hue',
+    titleVi: 'Miền Trung 6 ngày: Đà Nẵng, Hội An và Huế',
+    order: 5,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Ninh Binh Karst River & Boats',
-    url: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?w=800&auto=format&fit=crop&q=80'
+    id: 'vid_ninhbinh',
+    city: 'Ninh Bình',
+    url: 'https://www.youtube.com/watch?v=SKXLaflxITU',
+    title: 'Seven days in northern Vietnam — Ninh Binh, Sapa & Hanoi',
+    titleVi: 'Bảy ngày miền Bắc: Ninh Bình, Sa Pa và Hà Nội',
+    order: 6,
+    active: true,
+    createdAt: '2026-08-28',
   },
   {
-    label: 'Sa Pa Terraced Rice Fields',
-    url: 'https://images.unsplash.com/photo-1540555700478-4be289fbecef?w=800&auto=format&fit=crop&q=80'
-  }
+    id: 'vid_sapa',
+    city: 'Sa Pa',
+    url: 'https://www.youtube.com/watch?v=3RaFlN8Rig0',
+    title: 'Thirty days across Vietnam — Hanoi, Sapa, Hoi An & Da Lat',
+    titleVi: 'Ba mươi ngày dọc Việt Nam: Hà Nội, Sa Pa, Hội An, Đà Lạt',
+    order: 7,
+    active: true,
+    createdAt: '2026-08-28',
+  },
+  {
+    id: 'vid_dalat',
+    city: 'Đà Lạt',
+    url: 'https://www.youtube.com/watch?v=qcbNp0giYPE',
+    title: 'Fourteen days in Vietnam — Hanoi, Ninh Binh, Nha Trang & Da Lat',
+    titleVi: 'Mười bốn ngày ở Việt Nam: Hà Nội, Ninh Bình, Nha Trang, Đà Lạt',
+    order: 8,
+    active: true,
+    createdAt: '2026-08-28',
+  },
 ];

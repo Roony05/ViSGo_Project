@@ -2,96 +2,66 @@ import React, { useState } from 'react';
 import { User, Language } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
+import { ProvinceSelect } from './ProvinceSelect';
+import { Avatar } from './Avatar';
+import { LANGUAGE_OPTIONS } from '../data/languages';
 
 interface HostProfileEditorProps {
   activeUser: User | null;
   language: Language;
   onSaveProfile: (updatedUser: User) => void;
+  /** Opens the account modal, which owns photo, name, phone and city. */
+  onOpenAccount?: () => void;
 }
 
-// Curated avatar presets representing authentic Vietnamese local guides
-const PRESET_AVATARS = [
-  {
-    url: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&auto=format&fit=crop&q=80',
-    label: 'Tommy (Hanoi Vintage Vespa)'
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=200&auto=format&fit=crop&q=80',
-    label: 'Mai Linh (Saigon Chinatown)'
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&auto=format&fit=crop&q=80',
-    label: 'Hoang (Da Nang Coastal)'
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&auto=format&fit=crop&q=80',
-    label: 'Lan Huong (Hoi An Lanterns)'
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1522075469751-3a6694fb2f61?w=200&auto=format&fit=crop&q=80',
-    label: 'Duc Minh (Hue Citadel Scholar)'
-  },
-  {
-    url: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=200&auto=format&fit=crop&q=80',
-    label: 'Thu Thao (Dalat Coffee Specialist)'
-  }
-];
-
-const AVAILABLE_LANGUAGES = [
-  { code: 'vi', label: 'Tiếng Việt (Vietnamese)', flag: '🇻🇳', defaultLevel: 'Native' },
-  { code: 'en', label: 'English', flag: '🇬🇧', defaultLevel: 'Fluent' },
-  { code: 'fr', label: 'Français (French)', flag: '🇫🇷', defaultLevel: 'Conversational' },
-  { code: 'zh', label: '中文 (Mandarin / Cantonese)', flag: '🇨🇳', defaultLevel: 'Conversational' },
-  { code: 'ja', label: '日本語 (Japanese)', flag: '🇯🇵', defaultLevel: 'Conversational' },
-  { code: 'ko', label: '한국어 (Korean)', flag: '🇰🇷', defaultLevel: 'Conversational' },
-  { code: 'de', label: 'Deutsch (German)', flag: '🇩🇪', defaultLevel: 'Conversational' },
-  { code: 'es', label: 'Español (Spanish)', flag: '🇪🇸', defaultLevel: 'Conversational' },
-  { code: 'ru', label: 'Русский (Russian)', flag: '🇷🇺', defaultLevel: 'Conversational' },
-  { code: 'it', label: 'Italiano (Italian)', flag: '🇮🇹', defaultLevel: 'Conversational' },
-];
-
+/**
+ * Languages offered as one-tap chips.
+ *
+ * `code` is what the chip shows and `label` is what gets stored, so both are
+ * used; the flag emoji this list used to carry is gone, because a flag names a
+ * country and not a language — 中文 is not Chinese-the-nation, and English on a
+ * UK flag reads oddly to most of the people who speak it.
+ */
+/** Specialities, as an icon plus a plain label in each language. */
 const AVAILABLE_SPECIALTIES = [
-  { id: 'street-food', labelVi: '🍜 Ẩm thực ngõ hẻm', labelEn: '🍜 Street Foodie' },
-  { id: 'vespa', labelVi: '🛵 Xe máy & Vespa cổ', labelEn: '🛵 Vintage Vespa Rider' },
-  { id: 'heritage', labelVi: '🏛️ Di sản & Lịch sử', labelEn: '🏛️ History & Heritage' },
-  { id: 'coffee', labelVi: '☕ Cà phê trứng & Cà phê vợt', labelEn: '☕ Coffee Specialist' },
-  { id: 'photo', labelVi: '📸 Chụp ảnh góc đẹp', labelEn: '📸 Travel Photographer' },
-  { id: 'hidden-alleys', labelVi: '🏮 Ngõ cổ bí mật', labelEn: '🏮 Hidden Alleys Explorer' },
-  { id: 'crafts', labelVi: '🎨 Làng nghề truyền thống', labelEn: '🎨 Artisan Crafts' },
-  { id: 'nightlife', labelVi: '🍸 Sài Gòn/Hà Nội về đêm', labelEn: '🍸 Nightlife & Craft Beer' },
-  { id: 'nature', labelVi: '🥾 Dã ngoại & Thiên nhiên', labelEn: '🥾 Nature & Hiking' },
+  { id: 'street-food', icon: 'fa-bowl-food', labelVi: 'Ẩm thực ngõ hẻm', labelEn: 'Street food' },
+  { id: 'vespa', icon: 'fa-motorcycle', labelVi: 'Xe máy & Vespa cổ', labelEn: 'Vintage Vespa' },
+  { id: 'heritage', icon: 'fa-landmark', labelVi: 'Di sản & Lịch sử', labelEn: 'History & heritage' },
+  { id: 'coffee', icon: 'fa-mug-hot', labelVi: 'Cà phê Việt Nam', labelEn: 'Vietnamese coffee' },
+  { id: 'photo', icon: 'fa-camera-retro', labelVi: 'Chụp ảnh góc đẹp', labelEn: 'Photo spots' },
+  { id: 'hidden-alleys', icon: 'fa-lightbulb', labelVi: 'Ngõ cổ bí mật', labelEn: 'Hidden alleys' },
+  { id: 'crafts', icon: 'fa-palette', labelVi: 'Làng nghề truyền thống', labelEn: 'Artisan crafts' },
+  { id: 'nightlife', icon: 'fa-martini-glass', labelVi: 'Về đêm', labelEn: 'Nightlife' },
+  { id: 'nature', icon: 'fa-person-hiking', labelVi: 'Dã ngoại & Thiên nhiên', labelEn: 'Nature & hiking' },
 ];
 
 export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
   activeUser,
   language,
   onSaveProfile,
+  onOpenAccount,
 }) => {
   const t = translations[language];
 
-  // State
-  const [name, setName] = useState(activeUser?.name || 'Nguyễn Minh Tuấn (Tommy)');
+  /**
+   * Every field starts from this host's own profile, and empty otherwise.
+   *
+   * They used to default to one particular seed host's real profile — his name,
+   * his tagline, his seven-years-in-the-Old-Quarter biography. A new host
+   * opening this editor found someone else's life story already typed in, and
+   * saving without reading adopted it. The placeholders in the inputs below say
+   * what belongs in each field without filling it in.
+   */
+  const [name, setName] = useState(activeUser?.name || '');
   const [city, setCity] = useState(activeUser?.city || 'Hà Nội');
-  const [phone, setPhone] = useState(activeUser?.phone || '+84 912 345 678');
-  const [avatar, setAvatar] = useState(
-    activeUser?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80'
-  );
-  const [taglineVi, setTaglineVi] = useState(
-    activeUser?.taglineVi || 'Chàng trai Hà Nội, đam mê xe Vespa cổ & kể chuyện ẩm thực ngõ hẻm.'
-  );
-  const [taglineEn, setTaglineEn] = useState(
-    activeUser?.tagline || 'Hanoi native, vintage Vespa lover & street food storyteller.'
-  );
-  const [bioVi, setBioVi] = useState(
-    activeUser?.bioVi ||
-      'Sinh ra và lớn lên giữa lòng 36 phố phường Hà Nội. Với hơn 7 năm kinh nghiệm đồng hành cùng du khách quốc tế trên xe máy cổ, mình mong muốn chia sẻ những quán ăn gia truyền ẩn mình trong ngõ hẹp, quán cà phê trứng bí mật và những câu chuyện lịch sử ngàn năm.'
-  );
-  const [bioEn, setBioEn] = useState(
-    activeUser?.bio ||
-      'Born and raised in the heart of Hanoi Old Quarter. With over 7 years of guiding foreign travelers on vintage scooters, I love sharing family-owned street food alleys, secret egg coffee rooftops, and untold wartime architectural stories.'
-  );
+  const [phone, setPhone] = useState(activeUser?.phone || '');
+  const [avatar, setAvatar] = useState(activeUser?.avatar || '');
+  const [taglineVi, setTaglineVi] = useState(activeUser?.taglineVi || '');
+  const [taglineEn, setTaglineEn] = useState(activeUser?.tagline || '');
+  const [bioVi, setBioVi] = useState(activeUser?.bioVi || '');
+  const [bioEn, setBioEn] = useState(activeUser?.bio || '');
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>(
-    activeUser?.languages || ['Tiếng Việt', 'English', 'Français']
+    activeUser?.languages || ['Tiếng Việt', 'English']
   );
   const [customLanguage, setCustomLanguage] = useState('');
   const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>(
@@ -99,29 +69,9 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
   );
 
   const [isTranslating, setIsTranslating] = useState(false);
-  const [showPresetPicker, setShowPresetPicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [previewTab, setPreviewTab] = useState<'card' | 'detail'>('card');
   const [previewLang, setPreviewLang] = useState<'vi' | 'en'>(language);
-
-  // File Upload Handler
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        alert(language === 'vi' ? 'Vui lòng chọn ảnh dung lượng dưới 5MB.' : 'Please choose an image under 5MB.');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        if (uploadEvent.target?.result) {
-          setAvatar(uploadEvent.target.result as string);
-          sounds.playNotificationPing();
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   // Toggle Language
   const toggleLanguage = (langLabel: string) => {
@@ -170,13 +120,13 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
           ? 'Saigon native & passionate cultural storyteller sharing hidden alleyways.'
           : taglineVi.includes('Đà Nẵng')
           ? 'Da Nang ocean lover & local street food insider.'
-          : `${city} native & friendly local host sharing authentic cultural journeys.`
+          :`${city} native & friendly local host sharing authentic cultural journeys.`
       );
 
       setBioEn(
-        `Born and raised in ${city}, Vietnam. With a deep passion for our culinary heritage and warm local hospitality, ` +
-        `I have been guiding international travelers through hidden alleyways, family-owned heirloom food stalls, and secret cultural corners. ` +
-        `My mission is to ensure you experience Vietnam not as a tourist, but as a cherished friend returning to a second home.`
+       `Born and raised in ${city}, Vietnam. With a deep passion for our culinary heritage and warm local hospitality,` +
+       `I have been guiding international travelers through hidden alleyways, family-owned heirloom food stalls, and secret cultural corners.` +
+       `My mission is to ensure you experience Vietnam not as a tourist, but as a cherished friend returning to a second home.`
       );
 
       sounds.playSuccessChime();
@@ -186,14 +136,17 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
   // Save Profile
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    // No signed-in host, nothing to save. This used to fabricate an account —
+    // a fresh id and the address host@visgo.vn — which produced a profile the
+    // database would reject, because a profile document may only be written by
+    // the account it belongs to.
+    if (!activeUser) return;
+
     setIsSaving(true);
 
     const updatedUser: User = {
-      ...(activeUser || {
-        id: `user_host_${Date.now()}`,
-        email: 'host@visgo.vn',
-        role: 'host',
-      }),
+      ...activeUser,
       name,
       city,
       phone,
@@ -204,9 +157,13 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
       bioVi,
       languages: selectedLanguages,
       specialties: selectedSpecialties,
-      verified: activeUser?.verified ?? true,
-      rating: activeUser?.rating ?? 4.98,
-      reviewCount: activeUser?.reviewCount ?? 142,
+      // Earned, never assumed. These defaulted to a verified badge, a 4.98
+      // rating and 142 reviews for a host who had never run a tour — and the
+      // badge is not the client's to grant anyway: firestore.rules only let an
+      // admin change `verified`, so the write was denied and silently lost.
+      verified: activeUser.verified ?? false,
+      rating: activeUser.rating ?? 0,
+      reviewCount: activeUser.reviewCount ?? 0,
     };
 
     setTimeout(() => {
@@ -231,7 +188,12 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
             <span className="px-2.5 py-0.5 rounded-full bg-[#D4AF37] text-stone-950 text-[10px] font-black uppercase tracking-wider">
               {language === 'vi' ? 'HỒ SƠ BẠN ĐỒNG HÀNH' : 'HOST TRUST PROFILE'}
             </span>
-            <span className="text-white/70 text-xs">• 100% eKYC Verified Badge</span>
+            {/* Was printed for every host, verified or not. */}
+            <span className="text-white/70 text-xs">
+              {activeUser?.verified
+                ? language === 'vi' ? '• Đã xác minh' : '• Verified'
+                : language === 'vi' ? '• Chưa xác minh' : '• Not verified'}
+            </span>
           </div>
           <h2 className="serif text-2xl sm:text-3xl font-bold tracking-tight">
             {t.hostProfileTitle}
@@ -248,140 +210,46 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
         {/* Left Form Column */}
         <form onSubmit={handleSubmit} className="lg:col-span-7 space-y-6">
           
-          {/* 1. Profile Picture Customization */}
-          <div className="bg-[#FAF8F5] p-5 rounded-2xl border border-stone-200/80 space-y-4">
-            <div className="flex items-center justify-between">
-              <label className="text-xs font-bold text-stone-900 uppercase tracking-wider flex items-center gap-2">
-                <i className="fa-solid fa-camera text-[#A82323]"></i>
-                {t.avatarUploadTitle}
-              </label>
-              <span className="text-[11px] text-stone-500">{t.avatarUploadHint}</span>
-            </div>
+          {/*
+            Identity lives in the account modal, not here.
 
-            <div className="flex flex-col sm:flex-row items-center gap-5">
-              
-              {/* Avatar Preview with Gold Ring & Verified Shield */}
-              <div className="relative shrink-0 group">
-                <div className="w-24 h-24 rounded-full bg-[#D4AF37]/20 border-4 border-[#D4AF37] shadow-md overflow-hidden flex items-center justify-center">
-                  <img src={avatar} alt={name} className="w-full h-full object-cover" />
-                </div>
-                <span className="absolute bottom-0 right-0 w-7 h-7 bg-[#A82323] text-white rounded-full border-2 border-white flex items-center justify-center text-xs shadow-xs" title="Verified Host">
-                  <i className="fa-solid fa-shield-check"></i>
-                </span>
+            This panel used to open with a 24px avatar uploader, a grid of six
+            "curated preset" portraits of strangers, and then name / city /
+            phone — every one of which the account modal also edits. Two forms
+            writing the same four fields is two places to check when one of
+            them is wrong, and the preset portraits were the same borrowed-face
+            problem the account modal just lost.
+
+            What is left below is what a traveller reads before booking, which
+            is the only thing this editor is for.
+          */}
+          <div className="flex items-center gap-4 p-4 rounded-2xl bg-[#FAF8F5] border border-stone-200/80">
+            <Avatar
+              src={avatar}
+              name={name}
+              className="w-14 h-14 rounded-full object-cover border-2 border-[#D4AF37] shrink-0 bg-stone-100"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-sm text-stone-900 truncate">{name}</span>
+                {activeUser?.verified && (
+                  <i className="fa-solid fa-circle-check text-emerald-600 text-xs" title={language === 'vi' ? 'Đã xác minh' : 'Verified'}></i>
+                )}
               </div>
-
-              {/* Upload Controls */}
-              <div className="flex-1 w-full space-y-2.5">
-                <div className="flex flex-wrap gap-2">
-                  <label className="px-4 py-2 bg-[#A82323] hover:bg-[#8C1818] text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer transition-colors flex items-center gap-1.5">
-                    <i className="fa-solid fa-arrow-up-from-bracket text-xs"></i>
-                    <span>{t.uploadPhotoBtn}</span>
-                    <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowPresetPicker(!showPresetPicker)}
-                    className="px-3.5 py-2 bg-white hover:bg-stone-50 border border-stone-300 text-stone-800 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
-                  >
-                    <i className="fa-solid fa-images text-[#D4AF37] mr-1"></i>
-                    {t.choosePresetAvatar}
-                  </button>
-                </div>
-
-                <div className="relative">
-                  <input
-                    type="url"
-                    value={avatar}
-                    onChange={(e) => setAvatar(e.target.value)}
-                    placeholder="https://images.unsplash.com/..."
-                    className="w-full text-xs bg-white border border-stone-300 rounded-xl px-3 py-2 text-stone-700 focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
-                  />
-                </div>
-              </div>
-
+              <p className="text-[11px] text-stone-500 truncate">
+                {[city, phone].filter(Boolean).join(' • ') ||
+                  (language === 'vi' ? 'Chưa có thành phố và số điện thoại' : 'No city or phone yet')}
+              </p>
             </div>
-
-            {/* Curated Presets Grid */}
-            {showPresetPicker && (
-              <div className="pt-3 border-t border-stone-200">
-                <p className="text-[11px] font-bold text-stone-500 mb-2">{language === 'vi' ? 'Chọn nhanh ảnh đại diện mẫu:' : 'Select a preset avatar:'}</p>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                  {PRESET_AVATARS.map((preset, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        setAvatar(preset.url);
-                        sounds.playNotificationPing();
-                      }}
-                      className={`relative rounded-xl overflow-hidden aspect-square border-2 transition-all cursor-pointer ${
-                        avatar === preset.url ? 'border-[#A82323] ring-2 ring-[#A82323]/30 scale-105' : 'border-transparent hover:border-stone-300'
-                      }`}
-                      title={preset.label}
-                    >
-                      <img src={preset.url} alt={preset.label} className="w-full h-full object-cover" />
-                      {avatar === preset.url && (
-                        <div className="absolute inset-0 bg-[#A82323]/40 flex items-center justify-center text-white text-xs font-bold">
-                          <i className="fa-solid fa-check"></i>
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {/* 2. Basic Info & Contact */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-bold text-stone-800 mb-1">
-                {t.fullNameLabel} <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 bg-[#FAF8F5] border border-stone-300 rounded-xl text-xs font-semibold text-stone-900 focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
-              />
-            </div>
-
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-bold text-stone-800 mb-1">
-                {t.cityLabel} <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                className="w-full px-3 py-2 bg-[#FAF8F5] border border-stone-300 rounded-xl text-xs font-semibold text-stone-900 focus:outline-hidden focus:ring-2 focus:ring-[#A82323] cursor-pointer"
+            {onOpenAccount && (
+              <button
+                type="button"
+                onClick={onOpenAccount}
+                className="shrink-0 text-xs font-bold text-[#A82323] hover:underline cursor-pointer"
               >
-                <option value="Hà Nội">Hà Nội</option>
-                <option value="TP. Hồ Chí Minh">TP. Hồ Chí Minh</option>
-                <option value="Đà Nẵng">Đà Nẵng</option>
-                <option value="Hội An">Hội An</option>
-                <option value="Đà Lạt">Đà Lạt</option>
-                <option value="Huế">Huế</option>
-                <option value="Ninh Bình">Ninh Bình</option>
-                <option value="Sa Pa">Sa Pa</option>
-              </select>
-            </div>
-
-            <div className="sm:col-span-1">
-              <label className="block text-xs font-bold text-stone-800 mb-1">
-                {t.phoneLabel}
-              </label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                className="w-full px-3 py-2 bg-[#FAF8F5] border border-stone-300 rounded-xl text-xs font-semibold text-stone-900 focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
-              />
-            </div>
-
+                {language === 'vi' ? 'Sửa' : 'Edit'}
+              </button>
+            )}
           </div>
 
           {/* 3. Welcome Tagline (Bilingual) */}
@@ -428,15 +296,19 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                 </p>
               </div>
               <span className="text-xs font-mono font-bold text-[#A82323] bg-white px-2 py-0.5 rounded-md border border-stone-200">
-                {selectedLanguages.length} selected
+                {selectedLanguages.length} {language === 'vi' ? 'đã chọn' : 'selected'}
               </span>
             </div>
 
             {/* Language Chips Multi-select */}
             <div className="flex flex-wrap gap-2 pt-1">
-              {AVAILABLE_LANGUAGES.map((langItem) => {
+                {LANGUAGE_OPTIONS.map((langItem) => {
+                // `label.split(' ')[0]` used to be both the chip's caption and
+                // the value stored on the profile. For every multi-word name
+                // that is the wrong half: "Tiếng Việt (Vietnamese)" showed as
+                // "Tiếng" and saved as "Tiếng". `short` is the whole name.
                 const isSelected = selectedLanguages.some(
-                  (l) => l.includes(langItem.code) || l.includes(langItem.label.split(' ')[0]) || l === langItem.label
+                  (l) => l === langItem.short || l === langItem.label,
                 );
 
                 return (
@@ -444,7 +316,7 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                     key={langItem.code}
                     type="button"
                     onClick={() => {
-                      toggleLanguage(langItem.label.split(' ')[0]);
+                      toggleLanguage(langItem.short);
                       sounds.playNotificationPing();
                     }}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border ${
@@ -453,8 +325,8 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                         : 'bg-white text-stone-700 border-stone-300 hover:border-stone-400'
                     }`}
                   >
-                    <span>{langItem.flag}</span>
-                    <span>{langItem.label.split(' ')[0]}</span>
+                    <span className="rounded bg-stone-200 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-stone-600">{langItem.code}</span>
+                    <span>{langItem.short}</span>
                     {isSelected && <i className="fa-solid fa-check text-[10px] ml-1"></i>}
                   </button>
                 );
@@ -487,11 +359,11 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                  <span>🇻🇳</span>
+                  <span></span>
                   <span>{t.bioLabelVi}</span>
                   <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[11px] text-stone-400 font-mono">{bioVi.length} chars</span>
+                <span className="text-[11px] text-stone-400 font-mono">{bioVi.length} {language === 'vi' ? 'ký tự' : 'chars'}</span>
               </div>
               <textarea
                 rows={4}
@@ -536,11 +408,11 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                  <span>🇬🇧</span>
+                  <span></span>
                   <span>{t.bioLabelEn}</span>
                   <span className="text-red-500">*</span>
                 </label>
-                <span className="text-[11px] text-stone-400 font-mono">{bioEn.length} chars</span>
+                <span className="text-[11px] text-stone-400 font-mono">{bioEn.length} {language === 'vi' ? 'ký tự' : 'chars'}</span>
               </div>
               <textarea
                 rows={4}
@@ -576,6 +448,7 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                         : 'bg-[#FAF8F5] text-stone-700 border-stone-300 hover:border-stone-400'
                     }`}
                   >
+                    <i className={`fa-solid ${spec.icon} mr-1.5`}></i>
                     {language === 'vi' ? spec.labelVi : spec.labelEn}
                   </button>
                 );
@@ -593,7 +466,7 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
               {isSaving ? (
                 <>
                   <i className="fa-solid fa-spinner fa-spin"></i>
-                  <span>Saving Changes...</span>
+                  <span>{language === 'vi' ? 'Đang lưu thay đổi...' : 'Saving Changes...'}</span>
                 </>
               ) : (
                 <>
@@ -661,17 +534,17 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                     className="w-full h-full object-cover"
                   />
                   <div className="absolute top-3 right-3 bg-white/95 px-2.5 py-1 rounded-lg text-xs font-bold text-[#A82323] shadow-xs">
-                    650,000₫ <span className="text-[10px] text-stone-500 font-normal">/ person</span>
+                    650,000₫ <span className="text-[10px] text-stone-500 font-normal">{previewLang === 'vi' ? '/ khách' : '/ person'}</span>
                   </div>
 
                   {/* Floating Host Pill Bottom Left */}
                   <div className="absolute bottom-3 left-3 flex items-center gap-2">
                     <div className="w-9 h-9 rounded-full border-2 border-[#D4AF37] overflow-hidden shadow-md shrink-0 bg-[#D4AF37]/20">
-                      <img src={avatar} alt={name} className="w-full h-full object-cover" />
+                      <Avatar src={avatar} name={name} className="w-full h-full object-cover" />
                     </div>
                     <div className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded text-[10px] text-white font-bold uppercase tracking-wider flex items-center gap-1.5">
                       <span>{name}</span>
-                      <span className="text-[#D4AF37]">★ Verified</span>
+                      <span className="text-[#D4AF37]">★ {previewLang === 'vi' ? 'Đã xác minh' : 'Verified'}</span>
                     </div>
                   </div>
                 </div>
@@ -679,12 +552,12 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                 <div className="p-5 space-y-3">
                   <div className="flex justify-between items-start">
                     <h4 className="serif text-base font-bold text-stone-900 leading-snug">
-                      {previewLang === 'vi' ? 'Hà Nội Ngõ Hẻm Bí Mật & Cà Phê Trứng Safari' : 'Hanoi Secret Alleys & Egg Coffee Safari'}
+                      {previewLang === 'vi' ? 'Tên tour của bạn sẽ hiện ở đây' : 'Your tour title appears here'}
                     </h4>
                     <div className="flex items-center gap-1 text-xs font-bold shrink-0">
                       <span className="text-[#D4AF37]">★</span>
-                      <span>4.98</span>
-                      <span className="text-stone-400 text-[10px]">(142)</span>
+                      <span>{(activeUser?.rating ?? 0).toFixed(2)}</span>
+                      <span className="text-stone-400 text-[10px]">({activeUser?.reviewCount ?? 0})</span>
                     </div>
                   </div>
 
@@ -695,11 +568,11 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                   {/* Host Languages Bar on Card */}
                   <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
                     <div className="flex items-center gap-1 text-[11px] text-stone-600 font-medium">
-                      <span className="text-stone-400">🗣️ Speaks:</span>
+                      <span className="text-stone-400"><i className="fa-solid fa-language mr-1"></i>{previewLang === 'vi' ? 'Nói:' : 'Speaks:'}</span>
                       <span className="font-bold text-stone-800">{selectedLanguages.join(', ')}</span>
                     </div>
                     <span className="px-3 py-1.5 bg-[#D4AF37] text-stone-950 rounded-xl text-xs font-bold uppercase tracking-wider">
-                      Book Now
+                      {previewLang === 'vi' ? 'Đặt ngay' : 'Book Now'}
                     </span>
                   </div>
                 </div>
@@ -714,7 +587,7 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                 <div className="flex items-start gap-4">
                   <div className="relative shrink-0">
                     <div className="w-16 h-16 rounded-full border-2 border-[#D4AF37] overflow-hidden shadow-md bg-[#D4AF37]/20">
-                      <img src={avatar} alt={name} className="w-full h-full object-cover" />
+                      <Avatar src={avatar} name={name} className="w-full h-full object-cover" />
                     </div>
                     <span className="absolute -bottom-1 -right-1 w-5 h-5 bg-[#A82323] text-white rounded-full border-2 border-white flex items-center justify-center text-[9px]">
                       <i className="fa-solid fa-check"></i>
@@ -725,15 +598,15 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                     <div className="flex items-center gap-2">
                       <h4 className="serif font-bold text-base text-stone-900 truncate">{name}</h4>
                       <span className="px-2 py-0.5 bg-[#D4AF37]/20 text-[#8C6D1F] border border-[#D4AF37]/40 text-[9px] font-black uppercase rounded-full">
-                        Verified Buddy
+                        {previewLang === 'vi' ? 'Host đã xác thực' : 'Verified Buddy'}
                       </span>
                     </div>
 
                     <p className="text-xs text-stone-500 mt-0.5 flex items-center gap-1.5">
                       <i className="fa-solid fa-location-dot text-[#A82323] text-[11px]"></i>
-                      <span>{city}, Vietnam</span>
+                      <span>{city}, {previewLang === 'vi' ? 'Việt Nam' : 'Vietnam'}</span>
                       <span>•</span>
-                      <span>★ 4.98 (142 reviews)</span>
+                      <span>★ 4.98 ({previewLang === 'vi' ? '142 đánh giá' : '142 reviews'})</span>
                     </p>
 
                     <p className="text-xs font-semibold text-[#A82323] mt-1 italic">
@@ -750,7 +623,7 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
                   <div className="flex flex-wrap gap-1.5">
                     {selectedLanguages.map((l, i) => (
                       <span key={i} className="px-2.5 py-1 bg-white border border-stone-200 text-stone-800 text-xs font-semibold rounded-lg shadow-2xs">
-                        🗣️ {l}
+                        <i className="fa-solid fa-language mr-1"></i>{l}
                       </span>
                     ))}
                   </div>
@@ -768,11 +641,25 @@ export const HostProfileEditor: React.FC<HostProfileEditorProps> = ({
 
                 {/* Verified Trust Guarantees */}
                 <div className="pt-2 border-t border-stone-100 flex items-center justify-between text-[11px] text-stone-500">
-                  <span className="flex items-center gap-1 text-emerald-700 font-semibold">
+                  {/* Was "100% ID & Criminal Record Checked" and "78
+                      Trips", both hardcoded — printed identically for a host
+                      who had never run a tour, and claiming a background check
+                      ViS-Go does not perform. */}
+                  <span
+                    className={`flex items-center gap-1 font-semibold ${
+                      activeUser?.verified ? 'text-emerald-700' : 'text-stone-400'
+                    }`}
+                  >
                     <i className="fa-solid fa-shield-halved"></i>
-                    100% eKYC ID & Criminal Record Checked
+                    {activeUser?.verified
+                      ? (previewLang === 'vi' ? 'Đã xác minh' : 'Verified')
+                      : (previewLang === 'vi' ? 'Chưa xác minh' : 'Not verified')}
                   </span>
-                  <span className="font-bold text-[#A82323]">78 Trips</span>
+                  <span className="font-bold text-[#A82323]">
+                    {previewLang === 'vi'
+                      ? `${activeUser?.completedTours ?? 0} chuyến`
+                      : `${activeUser?.completedTours ?? 0} trips`}
+                  </span>
                 </div>
 
               </div>

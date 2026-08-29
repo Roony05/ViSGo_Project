@@ -1,0 +1,30 @@
+# The build stage needs src/, public/, index.html, vite.config.ts AND .env —
+# Vite inlines VITE_* at build time. Only the runtime stage's layers are
+# pushed, so nothing listed as needed here ever reaches the registry.
+# See the comments in Dockerfile.
+
+node_modules
+dist
+dist-server
+
+.git
+.github
+.firebase
+.claude
+
+# Never, under any circumstances, in an image.
+serviceAccount.json
+service-account.json
+
+*.log
+firestore-debug.log
+
+# Leftovers from old merges; not imported anywhere.
+*.orig
+*.rej
+
+# Docs, fixtures and one-off tooling: none of it runs in the container.
+*.md
+scripts
+seed
+netlify
