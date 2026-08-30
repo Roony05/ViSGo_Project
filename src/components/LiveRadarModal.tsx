@@ -4,9 +4,9 @@ import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
 import { RadarMap, type RadarMapHandle } from './RadarMap';
 import { LocationConsentGate } from './LocationConsentGate';
-import { StopSharingDialog } from './StopSharingDialog';
 import {
   grantSharing,
+  revokeSharing,
   shareVerdict,
   formatRemaining,
   type ShareVerdict,
@@ -17,6 +17,7 @@ import {
   haversineKm,
   formatDistance,
 } from '../utils/googleMaps';
+import { createSosAlert } from '../utils/firestoreDb';
 
 interface LiveRadarModalProps {
   isOpen: boolean;
@@ -76,13 +77,14 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
    * moment it opened, and the off switch was lost on the next remount.
    */
   const [verdict, setVerdict] = useState<ShareVerdict>({ state: 'none' });
-  const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const isGpsSharing = verdict.state === 'active';
   const [distanceKm, setDistanceKm] = useState<string>('0.75');
   const [estimatedMinutes, setEstimatedMinutes] = useState<number>(4);
   const [hostSpeedKmh, setHostSpeedKmh] = useState<number>(24);
   const [sosActive, setSosActive] = useState<boolean>(false);
   const [sosModalOpen, setSosModalOpen] = useState<boolean>(false);
+  const [sosStatus, setSosStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [sosError, setSosError] = useState('');
 
   // Great-circle distance in km between two coordinates.
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) =>
@@ -261,23 +263,76 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
     mapRef.current?.centerOn({ lat: landmark.lat, lng: landmark.lng }, 15);
   };
 
-  const handleTriggerSOS = () => {
+  const getEmergencyPosition = (): Promise<GeolocationPosition> =>
+    new Promise((resolve, reject) => {
+      if (!window.isSecureContext || !navigator.geolocation) {
+        reject(new Error(isVi ? 'SOS cần HTTPS và quyền truy cập vị trí.' : 'SOS requires HTTPS and location permission.'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        maximumAge: 5_000,
+        timeout: 15_000,
+      });
+    });
+
+  const handleTriggerSOS = async () => {
+    if (!booking || !activeUser) {
+      setSosStatus('error');
+      setSosError(
+        isVi
+          ? 'Bạn phải đăng nhập và mở SOS từ một chuyến đi của mình.'
+          : 'Sign in and open SOS from one of your bookings.',
+      );
+      return;
+    }
+
+    setSosStatus('sending');
+    setSosError('');
+
     // The one deliberate exception to the consent gate. Confirming SOS *is*
     // consent to share position: an alert carrying the default Hanoi fallback
     // coordinates would be worse than no alert, because it sends help to the
     // wrong place. The grant created here is bound by the same expiry and the
-    // same PIN-protected stop as any other.
-    if (booking && verdict.state !== 'active') {
+    // same time-boxed stop as any other routine GPS grant. The SOS record is
+    // separate and remains open until an administrator resolves it.
+    if (verdict.state !== 'active') {
       grantSharing(booking);
       setVerdict(shareVerdict(booking));
     }
-    setSosActive(true);
-    setSosModalOpen(false);
-    sounds.playSosSiren();
+
+    try {
+      // Never submit the Hanoi default or a demo landmark as an emergency
+      // location. SOS performs a fresh hardware fix even if the radar was off.
+      const position = await getEmergencyPosition();
+      const alert = await createSosAlert(booking, activeUser, {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracyMeters: Number.isFinite(position.coords.accuracy)
+          ? Math.round(position.coords.accuracy)
+          : null,
+      });
+      setUserCoords({ lat: position.coords.latitude, lng: position.coords.longitude });
+      setSosStatus('sent');
+      setSosActive(true);
+      setSosModalOpen(false);
+      sounds.playSosSiren();
+    } catch (error) {
+      console.error('[ViS-Go] SOS was not delivered:', error);
+      setSosStatus('error');
+      setSosError(
+        isVi
+          ? 'Chưa gửi được SOS. Hãy bật GPS, kiểm tra mạng rồi thử lại. Không có cơ quan công an nào được liên hệ.'
+          : 'SOS was not sent. Enable GPS, check your connection, and retry. No police service was contacted.',
+      );
+    }
   };
 
-  const handleCancelSOS = () => {
-    setSosActive(false);
+  const stopRoutineSharing = () => {
+    if (!booking) return;
+    revokeSharing(booking.id);
+    setVerdict(shareVerdict(booking));
+    sounds.playTap();
   };
 
   if (!isOpen) return null;
@@ -321,7 +376,7 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
                 )}
               </div>
               <p className="text-xs text-red-100/90 hidden sm:block">
-                {isVi ? 'Định vị vệ tinh thời gian thực & kết nối Host bản địa' : 'Real-time satellite GPS tracking & live Host buddy connection'}
+                {isVi ? 'GPS thiết bị thật • vị trí host đang mô phỏng' : 'Real device GPS • host position is simulated'}
               </p>
             </div>
           </div>
@@ -374,11 +429,11 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
                   )} — one hour before the meeting time. Until then ViS-Go reads nothing.`}
             </p>
             <button
-              onClick={() => setStopDialogOpen(true)}
+              onClick={stopRoutineSharing}
               className="mt-1 cursor-pointer rounded-xl border border-stone-200 px-4 py-2 text-xs font-bold text-stone-700 hover:bg-stone-50"
             >
-              <i className="fa-solid fa-key mr-1.5"></i>
-              {isVi ? 'Huỷ chia sẻ (cần mã PIN)' : 'Cancel sharing (PIN required)'}
+              <i className="fa-solid fa-toggle-off mr-1.5"></i>
+              {isVi ? 'Tắt chia sẻ GPS' : 'Stop GPS sharing'}
             </button>
           </div>
         )}
@@ -399,17 +454,15 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
         <>
         {/* SOS Alert Banner if Active */}
         {sosActive && (
-          <div className="bg-red-600 text-white px-4 py-3 flex items-center justify-between animate-pulse shrink-0">
+          <div className="bg-red-600 text-white px-4 py-3 flex items-center animate-pulse shrink-0">
             <div className="flex items-center gap-2 text-xs font-bold">
               <i className="fa-solid fa-triangle-exclamation text-base"></i>
-              <span>{t.sosTriggered} (Công an Du lịch 113 & Trung tâm ViS-Go đã nhận tọa độ)</span>
+              <span>
+                {isVi
+                  ? 'SOS đã gửi tới quản trị viên ViS-Go kèm tọa độ. Không liên hệ công an.'
+                  : 'SOS and coordinates sent to ViS-Go admins. Police were not contacted.'}
+              </span>
             </div>
-            <button
-              onClick={handleCancelSOS}
-              className="px-3 py-1 bg-white text-red-700 text-xs font-black rounded-lg uppercase tracking-wider cursor-pointer hover:bg-stone-100"
-            >
-              {t.sosCancel}
-            </button>
           </div>
         )}
 
@@ -424,17 +477,17 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-70"></span>
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600"></span>
               </span>
-              {isVi ? 'Đang chia sẻ vị trí với' : 'Sharing live location with'} {verdict.grant.hostName}
+              {isVi ? 'GPS đang bật trên thiết bị cho chuyến với' : 'Device GPS is active for the trip with'} {verdict.grant.hostName}
             </span>
             <span className="text-emerald-700">
               <i className="fa-regular fa-clock mr-1"></i>
               {isVi ? 'Tự tắt sau' : 'Auto-stops in'} {formatRemaining(verdict.endsInMs, isVi)}
             </span>
             <button
-              onClick={() => setStopDialogOpen(true)}
+              onClick={stopRoutineSharing}
               className="ml-auto cursor-pointer rounded-lg bg-emerald-700 px-2.5 py-1 font-bold text-white transition-colors hover:bg-emerald-800"
             >
-              <i className="fa-solid fa-key mr-1"></i>
+              <i className="fa-solid fa-toggle-off mr-1"></i>
               {isVi ? 'Tắt' : 'Stop'}
             </button>
           </div>
@@ -464,7 +517,7 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
 
           <div className="bg-white p-2.5 rounded-xl border border-stone-200 shadow-2xs flex items-center justify-between">
             <div className="min-w-0">
-              <span className="text-[10px] text-stone-400 font-semibold block">GPS Live Status</span>
+              <span className="text-[10px] text-stone-400 font-semibold block">Device GPS</span>
               <span
                 className={`font-bold text-xs flex items-center gap-1 ${
                   isGpsSharing ? 'text-emerald-700' : 'text-stone-500'
@@ -473,21 +526,20 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
                 <span
                   className={`w-2 h-2 rounded-full ${isGpsSharing ? 'bg-emerald-500' : 'bg-stone-400'}`}
                 ></span>
-                {isGpsSharing ? (isVi ? 'Đang chia sẻ' : 'Sharing') : (isVi ? 'Tắt' : 'Off')}
+                {isGpsSharing ? (isVi ? 'Đang đọc GPS' : 'Reading GPS') : (isVi ? 'Tắt' : 'Off')}
               </span>
             </div>
             {/*
-              Off is one tap; on is not, and neither is off without the PIN.
-              This tile used to be a bare toggle, so anyone holding the phone
-              could silently switch live location on or off.
+              Routine GPS can be stopped explicitly. This never closes an SOS
+              record, which remains under administrator control.
             */}
             {isGpsSharing && (
               <button
-                onClick={() => setStopDialogOpen(true)}
+                onClick={stopRoutineSharing}
                 className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-xs cursor-pointer bg-stone-900 text-[#D4AF37] hover:bg-stone-800"
-                title={isVi ? 'Tắt chia sẻ vị trí (cần mã PIN)' : 'Stop sharing (PIN required)'}
+                title={isVi ? 'Tắt chia sẻ vị trí' : 'Stop location sharing'}
               >
-                <i className="fa-solid fa-key"></i>
+                <i className="fa-solid fa-toggle-off"></i>
               </button>
             )}
           </div>
@@ -618,21 +670,6 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
 
       </div>
 
-      {/* PIN prompt for stopping. Rendered above the radar so it cannot be
-          dismissed by scrolling the panel behind it. */}
-      {stopDialogOpen && booking && (verdict.state === 'active' || verdict.state === 'scheduled') && (
-        <StopSharingDialog
-          bookingId={booking.id}
-          hostName={verdict.grant.hostName}
-          language={language}
-          onStopped={() => {
-            setStopDialogOpen(false);
-            setVerdict(shareVerdict(booking));
-          }}
-          onCancel={() => setStopDialogOpen(false)}
-        />
-      )}
-
       {/* SOS Confirmation Modal */}
       {sosModalOpen && (
         <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-xs">
@@ -651,9 +688,15 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
 
             <div className="p-3 bg-stone-100 rounded-xl text-[11px] text-stone-700 text-left font-mono space-y-1">
               <div><i className="fa-solid fa-location-dot mr-1.5"></i>Tọa độ: {userCoords.lat.toFixed(5)}, {userCoords.lng.toFixed(5)}</div>
-              <div><i className="fa-solid fa-tower-broadcast mr-1.5"></i>Điều phối khẩn cấp: Công an Du lịch 113 & ViS-Go Safety Shield</div>
-              <div><i className="fa-solid fa-bolt mr-1.5"></i>Thời gian phản hồi: Giao thức tự động phát tín hiệu 24/7</div>
+              <div><i className="fa-solid fa-tower-broadcast mr-1.5"></i>{isVi ? 'Nơi nhận: quản trị viên ViS-Go' : 'Recipient: ViS-Go administrators'}</div>
+              <div><i className="fa-solid fa-shield mr-1.5"></i>{isVi ? 'Không tự động liên hệ công an hay dịch vụ khẩn cấp' : 'Does not automatically contact police or emergency services'}</div>
             </div>
+
+            {sosStatus === 'error' && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 text-left">
+                {sosError}
+              </div>
+            )}
 
             <div className="flex gap-3 pt-2">
               <button
@@ -667,9 +710,12 @@ export const LiveRadarModal: React.FC<LiveRadarModalProps> = ({
               <button
                 type="button"
                 onClick={handleTriggerSOS}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl uppercase tracking-wider shadow-lg cursor-pointer"
+                disabled={sosStatus === 'sending'}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-xs font-extrabold rounded-xl uppercase tracking-wider shadow-lg cursor-pointer"
               >
-                {language === 'vi' ? 'Xác Nhận SOS' : 'Confirm SOS'}
+                {sosStatus === 'sending'
+                  ? language === 'vi' ? 'Đang gửi…' : 'Sending…'
+                  : language === 'vi' ? 'Gửi tới admin' : 'Send to admin'}
               </button>
             </div>
           </div>

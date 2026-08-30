@@ -99,8 +99,15 @@ await ok('KHACH dat tour cua Le Van Hoang', async () => {
 });
 
 await ok('KHACH mo duoc hoi thoai voi dung host do', async () => {
+  // `tourId` is required by the rules: it is what proves the host on the
+  // participant list really owns the tour being discussed, which is what lets
+  // a traveller open a thread before any booking exists.
   await setDoc(doc(CUST.db, 'conversations', BOOKING), {
-    participants: [custUid, TOUR.hostId], bookingId: BOOKING, lastMessage: '', updatedAt: serverTimestamp(),
+    participants: [custUid, TOUR.hostId], bookingId: BOOKING, tourId: TOUR.id,
+    tourTitle: TOUR.title, city: TOUR.city,
+    customerId: custUid, hostId: TOUR.hostId,
+    customerName: 'Sarah Jenkins', hostName: TOUR.hostName,
+    lastMessage: '', updatedAt: serverTimestamp(),
   });
   created.push(['conversations', BOOKING]);
   await addDoc(collection(CUST.db, 'conversations', BOOKING, 'messages'), {

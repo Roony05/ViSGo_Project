@@ -26,8 +26,8 @@ interface Message {
 }
 
 const QUICK_PROMPTS = {
-  vi: ['Viết hay hơn', 'Dịch sang tiếng Anh', 'Dịch sang tiếng Việt', 'Ngắn gọn lại'],
-  en: ['Polish this', 'Translate to English', 'Translate to Vietnamese', 'Make it concise'],
+  vi: ['Cải thiện toàn bộ nội dung', 'Tạo bản tiếng Anh', 'Tạo bản tiếng Việt', 'Rút gọn phần mô tả'],
+  en: ['Improve the whole listing', 'Create an English version', 'Create a Vietnamese version', 'Shorten the description'],
 };
 
 export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
@@ -37,7 +37,6 @@ export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
   onApply,
 }) => {
   const [open, setOpen] = useState(false);
-  const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const calls = useRef(0);
@@ -68,7 +67,6 @@ export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
     const fingerprint = JSON.stringify(draft) + '\u0001' + message;
     const userMessage: Message = { id: nextId.current++, role: 'user', text: message };
     setMessages((previous) => [...previous, userMessage]);
-    setInput('');
 
     let outcome = cache.current.get(fingerprint);
     if (!outcome) {
@@ -106,11 +104,31 @@ export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
 
       {open && (
         <div className="border-t border-amber-200 p-3 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              isVi ? '1. Chọn một tác vụ nhanh' : '1. Choose a quick action',
+              isVi ? '2. Xem bản AI đề xuất' : '2. Review the suggestion',
+              isVi ? '3. Bấm Áp dụng vào form' : '3. Press Apply to form',
+            ].map((step) => (
+              <div key={step} className="rounded-xl border border-amber-200 bg-white p-2 text-[10px] font-semibold leading-relaxed text-stone-600">
+                {step}
+              </div>
+            ))}
+          </div>
+
           <p className="text-[11px] text-stone-600">
-            {isVi ? 'AI chỉ đề xuất. Bạn chủ động bấm “Áp dụng vào form” để thay đổi nội dung.' : 'AI only suggests. Your draft changes only when you press “Apply to form”.'}
+            {isVi
+              ? 'AI đọc các ô bạn đã điền nhưng không tự thay đổi chúng. Chỉ nội dung bạn duyệt và bấm “Áp dụng vào form” mới được ghi vào form.'
+              : 'AI reads the fields you filled in but changes nothing automatically. Only a suggestion you approve is written into the form.'}
           </p>
 
           <div className="max-h-64 overflow-y-auto space-y-2">
+            {messages.length === 0 && !busy && (
+              <div className="rounded-xl border border-dashed border-amber-300 bg-white/70 px-3 py-4 text-center text-[11px] text-stone-500">
+                <i className="fa-regular fa-message mr-1.5"></i>
+                {isVi ? 'Bản đề xuất của AI sẽ xuất hiện tại đây để bạn xem trước.' : 'AI suggestions will appear here for your review.'}
+              </div>
+            )}
             {messages.map((message) => (
               <div key={message.id} className={`rounded-xl px-3 py-2 text-xs ${message.role === 'user' ? 'ml-8 bg-stone-900 text-white' : 'mr-8 bg-white border border-stone-200 text-stone-700'}`}>
                 <ChatMarkdown text={message.text} />
@@ -129,6 +147,9 @@ export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-1.5">
+            <span className="w-full text-[10px] font-bold uppercase tracking-wider text-amber-900">
+              {isVi ? 'Tác vụ nhanh' : 'Quick actions'}
+            </span>
             {QUICK_PROMPTS[language].map((prompt) => (
               <button key={prompt} type="button" disabled={busy} onClick={() => void send(prompt)} className="px-2.5 py-1 rounded-full border border-amber-300 bg-white text-[11px] font-bold text-stone-700 cursor-pointer disabled:opacity-50">
                 {prompt}
@@ -136,13 +157,9 @@ export const HostAiAssistant: React.FC<HostAiAssistantProps> = ({
             ))}
           </div>
 
-          <form onSubmit={(event) => { event.preventDefault(); void send(input); }} className="flex gap-2">
-            <input value={input} onChange={(event) => setInput(event.target.value)} placeholder={isVi ? 'Bạn muốn sửa hoặc dịch phần nào?' : 'What should I rewrite or translate?'} className="flex-1 px-3 py-2 rounded-xl border border-stone-300 bg-white text-xs" />
-            <button type="submit" disabled={busy || !input.trim()} aria-label={isVi ? 'Gửi' : 'Send'} className="w-10 rounded-xl bg-amber-500 text-stone-950 cursor-pointer disabled:opacity-40">
-              <i className="fa-solid fa-paper-plane"></i>
-            </button>
-          </form>
-          <p className="text-[10px] text-stone-400">{calls.current}/12</p>
+          <p className="text-[10px] text-stone-400">
+            {isVi ? `Còn ${12 - calls.current}/12 lượt trong lần mở form này` : `${12 - calls.current}/12 requests left in this form session`}
+          </p>
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Booking, Language, Tour } from '../types';
+import { Booking, Language, Tour, TourReview } from '../types';
 import { translations } from '../i18n/translations';
 import { generateBookingInvoicePDF } from '../utils/pdfGenerator';
 import { createGoogleCalendarUrl, addBookingToCalendar, resolveDurationHours } from '../utils/calendar';
@@ -10,6 +10,7 @@ import { HAS_GOOGLE_OAUTH } from '../config/env';
 interface MyBookingsViewProps {
   bookings: Booking[];
   tours: Tour[];
+  reviews: TourReview[];
   language: Language;
   currency: 'VND' | 'USD';
   onOpenLiveRadar: (booking: Booking) => void;
@@ -23,17 +24,22 @@ interface MyBookingsViewProps {
   onOpenChat: (booking: Booking) => void;
   onOpenReview: (tour: Tour) => void;
   onExploreMore: () => void;
+  onCancelBooking: (bookingId: string) => void;
+  onCompleteBooking: (bookingId: string) => void;
 }
 
 export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
   bookings,
   tours,
+  reviews,
   language,
   currency,
   onOpenLiveRadar,
   onOpenChat,
   onOpenReview,
   onExploreMore,
+  onCancelBooking,
+  onCompleteBooking,
 }) => {
   const t = translations[language];
 
@@ -138,7 +144,13 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                           : 'bg-stone-100 text-stone-600'
                       }`}
                     >
-                      {booking.status === 'confirmed' ? t.statusConfirmed : booking.status.toUpperCase()}
+                      {booking.status === 'confirmed'
+                        ? (language === 'vi' ? 'HOST ĐÃ XÁC NHẬN' : 'HOST CONFIRMED')
+                        : booking.status === 'pending'
+                          ? (language === 'vi' ? 'CHỜ HOST SẮP XẾP' : 'AWAITING HOST')
+                          : booking.status === 'completed'
+                            ? (language === 'vi' ? 'ĐÃ HOÀN THÀNH' : 'COMPLETED')
+                            : (language === 'vi' ? 'ĐÃ HỦY' : 'CANCELLED')}
                     </span>
                   </div>
 
@@ -157,7 +169,7 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                       <div className="mt-2 space-y-1 text-xs text-stone-600">
                         <div className="flex items-center gap-1.5">
                           <i className="fa-regular fa-calendar text-[#A82323] text-xs"></i>
-                          <span>{booking.bookingDate} @ {booking.bookingTime}</span>
+                          <span>{booking.bookingDate.split('-').reverse().join('/')} • {booking.bookingTime} (GMT+7)</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <i className="fa-solid fa-user-group text-amber-600 text-xs"></i>
@@ -243,9 +255,38 @@ export const MyBookingsView: React.FC<MyBookingsViewProps> = ({
                       <span className="hidden sm:inline">Gmail</span>
                     </button>
                   </div>
+                  {booking.status === 'pending' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ok = window.confirm(language === 'vi' ? 'Bạn chắc chắn muốn hủy booking này?' : 'Cancel this booking?');
+                        if (ok) onCancelBooking(booking.id);
+                      }}
+                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold cursor-pointer"
+                    >
+                      <i className="fa-solid fa-ban mr-1.5"></i>
+                      {language === 'vi' ? 'Khách hủy booking' : 'Cancel booking'}
+                    </button>
+                  )}
 
                   <div className="flex items-center gap-2">
-                    {matchedTour && (
+                    {booking.status === 'confirmed' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ok = window.confirm(language === 'vi'
+                            ? 'Bạn xác nhận chuyến đi đã hoàn thành? Sau bước này booking không thể hủy.'
+                            : 'Confirm that this trip is complete? The booking can no longer be cancelled.');
+                          if (ok) onCompleteBooking(booking.id);
+                        }}
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        <i className="fa-solid fa-flag-checkered mr-1.5"></i>
+                        {language === 'vi' ? 'Xác nhận hoàn thành' : 'Complete trip'}
+                      </button>
+                    )}
+
+                    {matchedTour && booking.status === 'completed' && !reviews.some((review) => review.bookingId === booking.id) && (
                       <button
                         onClick={() => onOpenReview(matchedTour)}
                         className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold cursor-pointer"

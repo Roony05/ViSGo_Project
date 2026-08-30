@@ -149,6 +149,14 @@ export const CallModal: React.FC<CallModalProps> = ({ booking, activeUser, langu
           // Straight into the room: a lobby screen on a two-person call is a
           // step that only ever loses the other party.
           prejoinPageEnabled: false,
+          // Current Jitsi releases use the nested option. Keep the legacy key
+          // above as well because public instances are not always upgraded in
+          // lock-step with the handbook.
+          prejoinConfig: { enabled: false },
+          requireDisplayName: false,
+          defaultLanguage: isVi ? 'vi' : 'en',
+          disableInviteFunctions: true,
+          toolbarButtons: ['microphone', 'camera', 'speakerstats', 'tileview', 'settings', 'hangup'],
           disableDeepLinking: true,
           // Audio first. Video is one tap away inside the call, and starting
           // without it is both kinder to a phone plan and the usual shape of
@@ -211,7 +219,9 @@ export const CallModal: React.FC<CallModalProps> = ({ booking, activeUser, langu
               {isVi ? `Gọi với ${otherName}` : `Call with ${otherName}`}
             </p>
             <p className="text-[11px] text-stone-400 truncate">
-              {isVi ? `Chuyến ${booking.id} • ${booking.city}` : `Trip ${booking.id} • ${booking.city}`}
+              {booking.id.startsWith('contact_')
+                ? `${isVi ? 'Trao đổi trước khi đặt' : 'Pre-booking call'} • ${booking.city}`
+                : isVi ? `Chuyến ${booking.id} • ${booking.city}` : `Trip ${booking.id} • ${booking.city}`}
             </p>
           </div>
 

@@ -14,11 +14,14 @@ import { Booking, Language } from '../types';
 import { GOOGLE_SCOPES, HAS_GOOGLE_OAUTH } from '../config/env';
 import { getAccessToken, GoogleAuthError } from './googleAuth';
 import { buildGoogleMapsPlaceUrl } from './googleMaps';
+import { readProfile } from './firestoreDb';
+import { createBookingInvoicePdfBase64 } from './pdfGenerator';
 
 export type MailDeliveryMode = 'sent' | 'compose' | 'mailto';
 
 export interface MailResult {
   mode: MailDeliveryMode;
+  recipients?: string[];
   /** Populated when OAuth sending failed and we degraded to a link. */
   degradedReason?: string;
 }
@@ -27,9 +30,10 @@ const formatVnd = (n: number): string => `${n.toLocaleString('vi-VN')} ₫`;
 
 /** Subject line for the confirmation email. */
 export function buildSubject(booking: Booking, language: Language): string {
+  const confirmed = booking.status === 'confirmed';
   return language === 'vi'
-    ? `[ViS-Go] Xác nhận đặt tour #${booking.id} — ${booking.tourTitleVi || booking.tourTitle}`
-    : `[ViS-Go] Booking confirmed #${booking.id} — ${booking.tourTitle}`;
+    ? `[ViS-Go] ${confirmed ? 'Xác nhận' : 'Yêu cầu'} đặt tour #${booking.id} — ${booking.tourTitleVi || booking.tourTitle}`
+    : `[ViS-Go] Booking ${confirmed ? 'confirmed' : 'request'} #${booking.id} — ${booking.tourTitle}`;
 }
 
 /** Plain-text body, used for the compose/mailto path and as the MIME alt part. */
@@ -42,7 +46,9 @@ export function buildPlainTextBody(booking: Booking, language: Language): string
     ? [
         `Xin chào ${booking.customerName},`,
         '',
-        `Đặt chỗ của bạn cho trải nghiệm "${title}" đã được xác nhận.`,
+        booking.status === 'confirmed'
+          ? `Đặt chỗ của bạn cho trải nghiệm "${title}" đã được host xác nhận.`
+          : `Yêu cầu đặt chỗ cho trải nghiệm "${title}" đã được ghi nhận và đang chờ host xác nhận.`,
         '',
         '--- CHI TIẾT CHUYẾN ĐI ---',
         `Mã đặt chỗ:   #${booking.id}`,
@@ -65,7 +71,9 @@ export function buildPlainTextBody(booking: Booking, language: Language): string
     : [
         `Hello ${booking.customerName},`,
         '',
-        `Your booking for "${title}" is confirmed.`,
+        booking.status === 'confirmed'
+          ? `Your booking for "${title}" has been confirmed by the host.`
+          : `Your request for "${title}" was received and is waiting for the host's confirmation.`,
         '',
         '--- TRIP DETAILS ---',
         `Booking ref:  #${booking.id}`,
@@ -186,34 +194,49 @@ function encodeHeader(value: string): string {
 }
 
 /** Builds an RFC 2822 multipart/alternative message. */
-function buildMimeMessage(booking: Booking, language: Language): string {
-  const boundary = `visgo_${Date.now().toString(36)}`;
+function buildMimeMessage(booking: Booking, language: Language, hostEmail: string): string {
+  const mixedBoundary = `visgo_mixed_${Date.now().toString(36)}`;
+  const altBoundary = `visgo_alt_${Date.now().toString(36)}`;
   const subject = buildSubject(booking, language);
+  const attachment = createBookingInvoicePdfBase64(booking, language);
 
   return [
     `To: ${booking.customerEmail}`,
+    ...(hostEmail ? [`Cc: ${hostEmail}`] : []),
     `Subject: ${encodeHeader(subject)}`,
     'MIME-Version: 1.0',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
     '',
-    `--${boundary}`,
+    `--${mixedBoundary}`,
+    `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+    '',
+    `--${altBoundary}`,
     'Content-Type: text/plain; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
     '',
     buildPlainTextBody(booking, language),
     '',
-    `--${boundary}`,
+    `--${altBoundary}`,
     'Content-Type: text/html; charset="UTF-8"',
     'Content-Transfer-Encoding: 8bit',
     '',
     buildHtmlBody(booking, language),
     '',
-    `--${boundary}--`,
+    `--${altBoundary}--`,
+    '',
+    `--${mixedBoundary}`,
+    'Content-Type: application/pdf; name="ViSGo-Booking.pdf"',
+    'Content-Disposition: attachment; filename="ViSGo-Booking.pdf"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    attachment,
+    '',
+    `--${mixedBoundary}--`,
   ].join('\r\n');
 }
 
 /** Gmail web compose URL, pre-filled. Works for anyone with a Gmail session. */
-export function buildGmailComposeUrl(booking: Booking, language: Language): string {
+export function buildGmailComposeUrl(booking: Booking, language: Language, hostEmail = ''): string {
   const params = new URLSearchParams({
     view: 'cm',
     fs: '1',
@@ -221,6 +244,7 @@ export function buildGmailComposeUrl(booking: Booking, language: Language): stri
     su: buildSubject(booking, language),
     body: buildPlainTextBody(booking, language),
   });
+  if (hostEmail) params.set('cc', hostEmail);
   return `https://mail.google.com/mail/?${params.toString()}`;
 }
 
@@ -234,8 +258,8 @@ export function buildMailtoUrl(booking: Booking, language: Language): string {
 }
 
 /** Opens the pre-filled compose window, degrading to mailto: if blocked. */
-function openComposeFallback(booking: Booking, language: Language): MailDeliveryMode {
-  const win = window.open(buildGmailComposeUrl(booking, language), '_blank', 'noopener,noreferrer');
+function openComposeFallback(booking: Booking, language: Language, hostEmail = ''): MailDeliveryMode {
+  const win = window.open(buildGmailComposeUrl(booking, language, hostEmail), '_blank', 'noopener,noreferrer');
   if (win) return 'compose';
   window.location.href = buildMailtoUrl(booking, language);
   return 'mailto';
@@ -247,8 +271,12 @@ function openComposeFallback(booking: Booking, language: Language): MailDelivery
  * Call this straight from a click handler — the OAuth path needs a user gesture.
  */
 export async function sendBookingEmail(booking: Booking, language: Language): Promise<MailResult> {
+  const host = await readProfile(booking.hostId).catch(() => null);
+  const hostEmail = host?.email && host.email !== booking.customerEmail ? host.email : '';
+  const recipients = [booking.customerEmail, hostEmail].filter(Boolean);
+
   if (!HAS_GOOGLE_OAUTH) {
-    return { mode: openComposeFallback(booking, language) };
+    return { mode: openComposeFallback(booking, language, hostEmail), recipients };
   }
 
   try {
@@ -260,7 +288,7 @@ export async function sendBookingEmail(booking: Booking, language: Language): Pr
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ raw: base64UrlEncode(buildMimeMessage(booking, language)) }),
+      body: JSON.stringify({ raw: base64UrlEncode(buildMimeMessage(booking, language, hostEmail)) }),
     });
 
     if (!response.ok) {
@@ -268,7 +296,7 @@ export async function sendBookingEmail(booking: Booking, language: Language): Pr
       throw new Error(`Gmail API ${response.status}: ${detail.slice(0, 200)}`);
     }
 
-    return { mode: 'sent' };
+    return { mode: 'sent', recipients };
   } catch (err) {
     // Any failure — denied consent, blocked popup, quota, offline — still
     // leaves the traveller with a working way to get their itinerary.
@@ -279,6 +307,6 @@ export async function sendBookingEmail(booking: Booking, language: Language): Pr
           ? err.message
           : 'Unknown Gmail error';
     console.warn('[ViS-Go] Gmail API send failed, falling back to compose:', reason);
-    return { mode: openComposeFallback(booking, language), degradedReason: reason };
+    return { mode: openComposeFallback(booking, language, hostEmail), recipients, degradedReason: reason };
   }
 }

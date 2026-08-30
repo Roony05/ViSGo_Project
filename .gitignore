@@ -13,3 +13,6 @@ coverage/
 # Firebase service account key — bypasses every security rule, never commit.
 serviceAccount.json
 service-account.json
+
+# Local Netlify folder
+.netlify

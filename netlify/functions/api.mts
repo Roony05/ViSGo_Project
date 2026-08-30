@@ -19,6 +19,7 @@ import {
   hostAssistEndpoint,
 } from '../../server/gemini';
 import { panoramaEndpoint } from '../../server/panorama';
+import { bookingDeliveryEndpoint } from '../../server/workspace';
 
 /** Netlify routes these paths straight to this function. */
 export const config = { path: '/api/*' };
@@ -45,6 +46,7 @@ const ROUTES: Record<string, Handler> = {
   '/api/rag-chat': ragChatEndpoint as Handler,
   '/api/translate': translateEndpoint as Handler,
   '/api/host-assist': hostAssistEndpoint as Handler,
+  '/api/booking-delivery': bookingDeliveryEndpoint as Handler,
   '/api/status': statusEndpoint as Handler,
   '/api/panorama': panoramaEndpoint as Handler,
 };

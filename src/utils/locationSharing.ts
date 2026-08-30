@@ -18,22 +18,14 @@
  *      host it names, and a mismatch is treated as no grant at all.
  *   4. Nothing but the grant is persisted. No coordinate is ever written to
  *      storage, so there is no location history to leak, subpoena, or sync.
- *   5. Turning it off requires the traveller's PIN. Anyone who picks up an
- *      unlocked phone can otherwise silently disable the safety feature the
- *      traveller is relying on — or, just as bad, quietly turn it on.
- *
- * On the PIN: it is hashed with PBKDF2-SHA256 and a per-device random salt, and
- * the plaintext is never stored. Be clear-eyed about what that buys — this is a
- * local device lock that stops someone grabbing the phone, not server-side
- * authentication. A determined attacker with the device and developer tools can
- * clear localStorage and start over; what they cannot do is read the PIN or
- * flip sharing behind the traveller's back in the normal UI.
+ *   5. The traveller may stop routine location sharing with one explicit tap.
+ *      SOS is separate: once submitted it remains in the admin queue until an
+ *      administrator marks it resolved.
  */
 
 import { Booking } from '../types';
 
 const GRANTS_KEY = 'visgo_location_grants_v1';
-const PIN_KEY = 'visgo_location_pin_v1';
 
 /** Window opens this long before the meeting time. */
 const LEAD_MS = 60 * 60 * 1000;
@@ -100,69 +92,6 @@ function prune(now: number): LocationGrant[] {
 }
 
 /* ------------------------------------------------------------------ */
-/* PIN                                                                 */
-/* ------------------------------------------------------------------ */
-
-interface StoredPin {
-  salt: string;
-  hash: string;
-  iterations: number;
-}
-
-const PIN_ITERATIONS = 150_000;
-
-const toB64 = (buf: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
-
-async function derive(pin: string, salt: Uint8Array, iterations: number): Promise<string> {
-  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, [
-    'deriveBits',
-  ]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: salt as unknown as BufferSource, iterations, hash: 'SHA-256' },
-    key,
-    256,
-  );
-  return toB64(bits);
-}
-
-export function hasPin(): boolean {
-  try {
-    return Boolean(window.localStorage.getItem(PIN_KEY));
-  } catch {
-    return false;
-  }
-}
-
-/** Sets the device PIN. Rejects anything too short to be worth checking. */
-export async function setPin(pin: string): Promise<{ status: 'ok' } | { status: 'too-short' }> {
-  if (!/^\d{4,8}$/.test(pin)) return { status: 'too-short' };
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const hash = await derive(pin, salt, PIN_ITERATIONS);
-  const stored: StoredPin = { salt: toB64(salt.buffer), hash, iterations: PIN_ITERATIONS };
-  try {
-    window.localStorage.setItem(PIN_KEY, JSON.stringify(stored));
-  } catch {
-    return { status: 'too-short' };
-  }
-  return { status: 'ok' };
-}
-
-export async function verifyPin(pin: string): Promise<boolean> {
-  try {
-    const raw = window.localStorage.getItem(PIN_KEY);
-    if (!raw) return false;
-    const stored: StoredPin = JSON.parse(raw);
-    const candidate = await derive(pin, fromB64(stored.salt), stored.iterations || PIN_ITERATIONS);
-    // Both values are our own base64 of a fixed-length digest, so a plain
-    // comparison leaks only length, which is constant.
-    return candidate === stored.hash;
-  } catch {
-    return false;
-  }
-}
-
-/* ------------------------------------------------------------------ */
 /* Grants                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -192,9 +121,7 @@ export function shareWindow(
 }
 
 /**
- * Grants sharing for one booking. The caller must have already established the
- * PIN — this does not prompt, so that the consent copy and the PIN entry can
- * live together in one screen rather than as two disconnected dialogs.
+ * Grants sharing for one booking after the traveller accepts the consent copy.
  */
 export function grantSharing(
   booking: Booking,
@@ -223,21 +150,16 @@ export function grantSharing(
 }
 
 /**
- * Revokes one booking's grant. Requires the PIN — this is the traveller's stop
- * button, and it must not be usable by whoever happens to be holding the phone.
+ * Revokes one booking's routine GPS grant. This never changes an SOS alert;
+ * only an administrator can close that separate Firestore record.
  */
-export async function revokeSharing(
-  bookingId: string,
-  pin: string,
-): Promise<{ status: 'ok' } | { status: 'bad-pin' }> {
-  if (!(await verifyPin(pin))) return { status: 'bad-pin' };
+export function revokeSharing(bookingId: string): { status: 'ok' } {
   writeGrants(prune(Date.now()).filter((g) => g.bookingId !== bookingId));
   return { status: 'ok' };
 }
 
-/** Revokes every grant on this device. Same PIN requirement. */
-export async function revokeAllSharing(pin: string): Promise<{ status: 'ok' } | { status: 'bad-pin' }> {
-  if (!(await verifyPin(pin))) return { status: 'bad-pin' };
+/** Revokes every routine GPS grant on this device. */
+export function revokeAllSharing(): { status: 'ok' } {
   writeGrants([]);
   return { status: 'ok' };
 }

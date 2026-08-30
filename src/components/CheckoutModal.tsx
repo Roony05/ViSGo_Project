@@ -8,6 +8,7 @@ import { sendBookingEmail } from '../utils/googleGmail';
 import { HAS_GOOGLE_OAUTH } from '../config/env';
 import { sounds } from '../utils/audio';
 import { newBookingCode } from '../utils/ids';
+import { deliverNewBooking } from '../utils/bookingDelivery';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -27,7 +28,7 @@ interface CheckoutModalProps {
   language: Language;
   currency: 'VND' | 'USD';
   onClose: () => void;
-  onConfirmBooking: (newBooking: Booking) => void;
+  onConfirmBooking: (newBooking: Booking) => Promise<boolean>;
   onOpenLiveRadar: (booking: Booking) => void;
 }
 
@@ -52,13 +53,17 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
   const [phone, setPhone] = useState(activeUser?.phone || '');
   const [isProcessing, setIsProcessing] = useState(false);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
-  const [showGmailModal, setShowGmailModal] = useState(false);
 
   // Real integration status, so the UI never claims something that didn't happen.
   const [mailStatus, setMailStatus] = useState<'idle' | 'sending' | 'sent' | 'compose' | 'error'>('idle');
   const [mailDetail, setMailDetail] = useState<string>('');
+  const [mailRecipients, setMailRecipients] = useState<string[]>([]);
   const [calendarStatus, setCalendarStatus] = useState<'idle' | 'working' | 'created' | 'template' | 'error'>('idle');
   const [calendarEventUrl, setCalendarEventUrl] = useState<string>('');
+  const [showCalendarPrompt, setShowCalendarPrompt] = useState(false);
+  const [deliveryStatus, setDeliveryStatus] = useState<'idle' | 'sending' | 'sent' | 'unavailable' | 'error'>('idle');
+  const [deliveryDetail, setDeliveryDetail] = useState('');
+  const [bookingError, setBookingError] = useState('');
 
   if (!isOpen || !draftBooking) return null;
 
@@ -81,8 +86,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     e.preventDefault();
     setIsProcessing(true);
 
-    setTimeout(() => {
-      setIsProcessing(false);
+    setTimeout(async () => {
       const newBooking: Booking = {
         id: newBookingCode(),
         tourId: draftBooking.tour.id,
@@ -100,6 +104,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         customerPhone: phone,
         bookingDate: draftBooking.date,
         bookingTime: draftBooking.time,
+        tourEndsAtEpochMs:
+          new Date(`${draftBooking.date}T${draftBooking.time}:00+07:00`).getTime()
+          + (draftBooking.tour.durationHours || 3) * 3_600_000,
         guestsCount: draftBooking.guests,
         totalPriceVND: draftBooking.totalVND,
         totalPriceUSD: draftBooking.totalUSD,
@@ -113,8 +120,32 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
         meetingPoint: language === 'vi' ? draftBooking.tour.meetingPointVi : draftBooking.tour.meetingPoint,
       };
 
+      const saved = await onConfirmBooking(newBooking);
+      setIsProcessing(false);
+      if (!saved) {
+        setBookingError(
+          language === 'vi'
+            ? 'Chưa giữ được chỗ. Có thể tour vừa được khách khác đặt hoặc kết nối mạng bị gián đoạn.'
+            : 'The slot could not be reserved. It may have just been booked or the network was interrupted.',
+        );
+        return;
+      }
+
       setConfirmedBooking(newBooking);
-      onConfirmBooking(newBooking);
+      setDeliveryStatus('sending');
+      void deliverNewBooking(newBooking, language, draftBooking.tour.durationHours || 3).then((result) => {
+        if (result.status === 'sent') {
+          setDeliveryStatus('sent');
+          sounds.playNotificationPing();
+          setShowCalendarPrompt(true);
+          return;
+        }
+        setDeliveryStatus(result.status === 'unavailable' ? 'unavailable' : 'error');
+        setDeliveryDetail(result.reason);
+        // The customer's own calendar remains useful even when system email
+        // delivery is not configured, so still offer it after the attempt.
+        setShowCalendarPrompt(true);
+      });
 
       // Play chime & Fire Confetti
       sounds.playSuccessChime();
@@ -145,17 +176,15 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     ? createGoogleCalendarUrl(confirmedBooking, language, tourDurationHours)
     : '#';
 
-  const handleAddToCalendar = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+  const handleAddToCalendar = async (e?: React.SyntheticEvent) => {
     if (!confirmedBooking) return;
-    // Let plain <a> navigation handle the no-OAuth case natively.
-    if (!HAS_GOOGLE_OAUTH) return;
-
-    e.preventDefault();
+    e?.preventDefault();
     setCalendarStatus('working');
 
     const result = await addBookingToCalendar(confirmedBooking, language, tourDurationHours);
     setCalendarEventUrl(result.eventUrl || '');
     setCalendarStatus(result.mode === 'created' ? 'created' : 'template');
+    setShowCalendarPrompt(false);
     if (result.mode === 'created') sounds.playSuccessChime();
   };
 
@@ -165,11 +194,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
     setMailDetail('');
 
     const result = await sendBookingEmail(confirmedBooking, language);
+    setMailRecipients(result.recipients || []);
 
     if (result.mode === 'sent') {
       setMailStatus('sent');
       sounds.playNotificationPing();
-      setTimeout(() => setShowGmailModal(false), 2200);
       return;
     }
 
@@ -199,7 +228,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
             </div>
             <div>
               <h3 className="font-serif font-bold text-base sm:text-lg">
-                {confirmedBooking ? t.bookingSuccessTitle : t.checkoutTitle}
+                  {confirmedBooking
+                    ? language === 'vi' ? 'Đã ghi nhận yêu cầu đặt tour' : 'Booking request recorded'
+                    : t.checkoutTitle}
               </h3>
               <p className="text-xs text-stone-200/90 font-medium">
                 {confirmedBooking
@@ -230,7 +261,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               <div>
                 <h4 className="font-serif font-bold text-xl text-stone-900">
-                  {t.bookingSuccessTitle}
+                  {language === 'vi' ? 'Đã ghi nhận yêu cầu đặt tour!' : 'Your booking request was recorded!'}
                 </h4>
                 <p className="text-xs sm:text-sm text-stone-600 max-w-md mx-auto mt-1 leading-relaxed">
                   {t.bookingSuccessMsg}
@@ -270,6 +301,22 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
               {/* Action Buttons: PDF, Gmail, Calendar, Live Radar */}
               <div className="space-y-2.5">
+
+                <div className={`rounded-xl border p-3 text-left text-[11px] leading-relaxed ${
+                  deliveryStatus === 'sent'
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                    : deliveryStatus === 'sending'
+                      ? 'border-blue-200 bg-blue-50 text-blue-800'
+                      : 'border-amber-300 bg-amber-50 text-amber-900'
+                }`}>
+                  {deliveryStatus === 'sending' ? (
+                    <><i className="fa-solid fa-spinner fa-spin mr-1.5"></i>{language === 'vi' ? 'Đang gửi biên bản đặt chỗ trước cho bạn và thông báo cho host…' : 'Sending your pre-reservation record and notifying the host…'}</>
+                  ) : deliveryStatus === 'sent' ? (
+                    <><i className="fa-solid fa-circle-check mr-1.5"></i>{language === 'vi' ? `Biên bản đặt chỗ trước đã gửi tới ${confirmedBooking.customerEmail}; host đã nhận email. Calendar của host chỉ được tạo sau khi host xác nhận.` : `Pre-reservation record sent to ${confirmedBooking.customerEmail}; the host was notified. The host calendar is created only after confirmation.`}</>
+                  ) : (
+                    <><i className="fa-solid fa-triangle-exclamation mr-1.5"></i>{language === 'vi' ? 'Booking đã được lưu nhưng hệ thống chưa gửi được email/lịch tự động. Bạn có thể tải biên bản hoặc mở bản nháp Gmail bên dưới.' : 'The booking was saved, but automatic email/calendar delivery is unavailable. Download the receipt or open a Gmail draft below.'}{deliveryDetail ? ` (${deliveryDetail})` : ''}</>
+                  )}
+                </div>
                 
                 {/* Download PDF Invoice */}
                 <button
@@ -281,8 +328,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <span>{t.downloadInvoice}</span>
                 </button>
 
-                {/* Add to Google Calendar & Send Gmail buttons in row */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {/* Customer calendar is optional. Host delivery is automatic above. */}
+                <div className={`grid grid-cols-1 ${deliveryStatus === 'sent' ? '' : 'sm:grid-cols-2'} gap-2`}>
                   <a
                     href={calendarUrl}
                     target="_blank"
@@ -308,12 +355,18 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     )}
                   </a>
 
-                  <button
+                  {deliveryStatus !== 'sent' && <button
                     type="button"
-                    onClick={() => setShowGmailModal(true)}
+                    onClick={handleSendEmail}
+                    disabled={mailStatus === 'sending' || mailStatus === 'sent'}
                     className="py-2.5 px-3 bg-white hover:bg-stone-50 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                   >
-                    {mailStatus === 'sent' ? (
+                    {mailStatus === 'sending' ? (
+                      <>
+                        <i className="fa-solid fa-spinner fa-spin text-red-600"></i>
+                        <span>{language === 'vi' ? 'Đang gửi PDF…' : 'Sending PDF…'}</span>
+                      </>
+                    ) : mailStatus === 'sent' ? (
                       <>
                         <i className="fa-solid fa-circle-check text-emerald-600"></i>
                         <span>{language === 'vi' ? 'Đã gửi email' : 'Email sent'}</span>
@@ -321,10 +374,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     ) : (
                       <>
                         <i className="fa-regular fa-envelope text-red-600"></i>
-                        <span>{t.sendGmailReceipt}</span>
+                        <span>{HAS_GOOGLE_OAUTH ? (language === 'vi' ? 'Gửi PDF qua Gmail' : 'Email PDF') : (language === 'vi' ? 'Mở bản nháp Gmail' : 'Open Gmail draft')}</span>
                       </>
                     )}
-                  </button>
+                  </button>}
                 </div>
 
                 {/* Link to the freshly created calendar event */}
@@ -337,6 +390,29 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   >
                     {language === 'vi' ? 'Mở sự kiện trong Google Calendar →' : 'Open the event in Google Calendar →'}
                   </a>
+                )}
+
+                {calendarStatus === 'created' && (
+                  <p className="text-[11px] text-emerald-700 font-semibold">
+                    <i className="fa-solid fa-circle-check mr-1"></i>
+                    {language === 'vi' ? 'Đã thêm lịch vào Google Calendar của bạn.' : 'Added to your Google Calendar.'}
+                  </p>
+                )}
+
+                {mailStatus === 'sent' && (
+                  <p className="text-[11px] text-emerald-700 font-semibold">
+                    <i className="fa-solid fa-circle-check mr-1"></i>
+                    {language === 'vi'
+                      ? `Gmail API đã gửi PDF tới ${mailRecipients.join(' và ')}.`
+                      : `Gmail API sent the PDF to ${mailRecipients.join(' and ')}.`}
+                  </p>
+                )}
+
+                {mailStatus === 'compose' && (
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    <i className="fa-solid fa-circle-info mr-1"></i>{mailDetail}{' '}
+                    {language === 'vi' ? 'PDF chưa được gửi tự động; hãy tải PDF và đính kèm trước khi bấm Gửi.' : 'The PDF was not sent automatically; download and attach it before pressing Send.'}
+                  </p>
                 )}
 
                 {/* Open Live GPS Radar */}
@@ -357,6 +433,11 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
           ) : (
             /* CHECKOUT FORM STATE */
             <form onSubmit={handleRequestBooking} className="space-y-4">
+              {bookingError && (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+                  <i className="fa-solid fa-circle-exclamation mr-1.5"></i>{bookingError}
+                </div>
+              )}
               
               {/* Order Quick Summary Header */}
               <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200/80 flex items-center gap-3">
@@ -434,8 +515,8 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
                 </p>
                 <p className="text-[11px] text-stone-600 leading-relaxed">
                   {language === 'vi'
-                    ? `Bạn gửi yêu cầu đặt chỗ, host xác nhận lại, rồi hai bên gặp nhau. Số tiền ${draftBooking.totalVND.toLocaleString('vi-VN')}₫ trả trực tiếp cho host khi gặp mặt.`
-                    : `You send a request, the host confirms it, and you meet. The ${draftBooking.totalVND.toLocaleString('vi-VN')}₫ is settled directly with your host when you do.`}
+                    ? `Bạn đang đặt chỗ trước. Hãy trao đổi và tự thanh toán trực tiếp theo thỏa thuận với host. Hệ thống không thu hoặc xác minh khoản ${draftBooking.totalVND.toLocaleString('vi-VN')}₫; host chỉ xác nhận sau khi họ tự kiểm tra.`
+                    : `This is a pre-reservation. Settle directly with the host as agreed. The system neither collects nor verifies the ${draftBooking.totalVND.toLocaleString('vi-VN')}₫; the host confirms only after checking it themselves.`}
                 </p>
               </div>
 
@@ -464,118 +545,30 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
       </div>
 
-      {/* Realistic Gmail Receipt Preview Modal */}
-      {showGmailModal && confirmedBooking && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-stone-300 overflow-hidden flex flex-col animate-in zoom-in-95">
-            
-            {/* Gmail Header */}
-            <div className="bg-[#EA4335] text-white px-4 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <i className="fa-solid fa-envelope text-lg"></i>
-                <span className="font-bold text-xs">
-                  {HAS_GOOGLE_OAUTH
-                    ? language === 'vi' ? 'Gửi qua Gmail API' : 'Send via Gmail API'
-                    : language === 'vi' ? 'Xem trước & soạn thư Gmail' : 'Preview & compose in Gmail'}
-                </span>
-              </div>
-              <button
-                onClick={() => setShowGmailModal(false)}
-                className="text-white hover:text-stone-200 p-1 cursor-pointer"
-              >
-                <i className="fa-solid fa-xmark"></i>
+      {showCalendarPrompt && confirmedBooking && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl border border-stone-200 text-center space-y-4">
+            <div className="mx-auto w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center text-xl">
+              <i className="fa-regular fa-calendar-plus"></i>
+            </div>
+            <div>
+              <h3 className="font-bold text-stone-900">
+                {language === 'vi' ? 'Thêm lịch cho bạn?' : 'Add this to your calendar?'}
+              </h3>
+              <p className="mt-1 text-xs text-stone-500 leading-relaxed">
+                {language === 'vi'
+                  ? 'Host đã được hệ thống thông báo riêng. Bạn có muốn thêm lịch trình này vào Google Calendar của chính mình không?'
+                  : 'The host is being notified separately. Would you like this itinerary on your own Google Calendar?'}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setShowCalendarPrompt(false)} className="py-2.5 rounded-xl bg-stone-100 text-stone-700 text-xs font-bold cursor-pointer">
+                {language === 'vi' ? 'Không cần' : 'Not now'}
+              </button>
+              <button type="button" disabled={calendarStatus === 'working'} onClick={() => void handleAddToCalendar()} className="py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold cursor-pointer disabled:opacity-60">
+                {calendarStatus === 'working' ? <i className="fa-solid fa-spinner fa-spin"></i> : language === 'vi' ? 'Có, thêm lịch' : 'Yes, add it'}
               </button>
             </div>
-
-            {/* Email Body */}
-            <div className="p-5 overflow-y-auto max-h-[70vh] space-y-4 text-xs">
-              <div className="border-b border-stone-200 pb-3">
-                <div className="flex justify-between text-stone-500 text-[11px]">
-                  <span><strong>From:</strong> ViS-Go Vietnam &lt;no-reply@visgo.vn&gt;</span>
-                  <span>Just now</span>
-                </div>
-                <div className="text-stone-500 text-[11px] mt-0.5">
-                  <strong>To:</strong> {confirmedBooking.customerName} &lt;{confirmedBooking.customerEmail}&gt;
-                </div>
-                <h3 className="font-bold text-sm text-stone-900 mt-2">
-                  Confirmed: Your Cultural Tour #{confirmedBooking.id} with {confirmedBooking.hostName}
-                </h3>
-              </div>
-
-              <div className="bg-stone-50 p-4 rounded-xl border border-stone-200 space-y-3">
-                <div className="flex items-center gap-2">
-                  <span className="font-serif font-black text-base text-[#A82323]">ViS-Go</span>
-                  <span className="text-[10px] text-stone-500 font-medium">Official Itinerary Voucher</span>
-                </div>
-
-                <p className="text-stone-700">
-                  Xin chào <strong>{confirmedBooking.customerName}</strong>,<br />
-                  Your booking for <strong>"{confirmedBooking.tourTitle}"</strong> has been successfully confirmed.
-                </p>
-
-                <div className="p-3 bg-white rounded-lg border border-stone-200 space-y-1.5 font-mono text-[11px]">
-                  <div><strong>Meeting Point:</strong> {confirmedBooking.meetingPoint}</div>
-                  <div><strong>Date &amp; Time:</strong> {confirmedBooking.bookingDate} @ {confirmedBooking.bookingTime}</div>
-                  <div><strong>Host Buddy:</strong> {confirmedBooking.hostName} ({confirmedBooking.hostPhone})</div>
-                  <div><strong>Travelers:</strong> {confirmedBooking.guestsCount} guests</div>
-                  <div><strong>Total Paid:</strong> {confirmedBooking.totalPriceVND.toLocaleString('vi-VN')} VND</div>
-                </div>
-
-                <p className="text-[11px] text-stone-500 italic">
-                  Tip: Have your live GPS radar ready 15 minutes before the tour to easily locate your local buddy!
-                </p>
-              </div>
-
-              {mailStatus === 'sent' && (
-                <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-lg text-center font-bold text-xs border border-emerald-300">
-                  ✓ {language === 'vi'
-                    ? `Đã gửi lịch trình tới ${confirmedBooking.customerEmail}`
-                    : `Itinerary sent to ${confirmedBooking.customerEmail}`}
-                </div>
-              )}
-
-              {mailStatus === 'compose' && (
-                <div className="p-2.5 bg-amber-50 text-amber-900 rounded-lg text-xs border border-amber-300 leading-relaxed">
-                  <i className="fa-solid fa-circle-info mr-1.5"></i>
-                  {mailDetail}
-                </div>
-              )}
-
-              {!HAS_GOOGLE_OAUTH && mailStatus === 'idle' && (
-                <div className="p-2.5 bg-stone-100 text-stone-700 rounded-lg text-[11px] border border-stone-300 leading-relaxed">
-                  <i className="fa-solid fa-circle-info mr-1.5"></i>
-                  {language === 'vi'
-                    ? 'Chưa cấu hình VITE_GOOGLE_CLIENT_ID. Bấm nút dưới để mở cửa sổ soạn thư Gmail với nội dung điền sẵn — bạn chỉ cần bấm Gửi. Thêm Client ID vào .env để gửi tự động.'
-                    : 'VITE_GOOGLE_CLIENT_ID is not configured. The button below opens a pre-filled Gmail compose window — just press Send. Add a Client ID to .env to send automatically.'}
-                </div>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={handleSendEmail}
-                  disabled={mailStatus === 'sending' || mailStatus === 'sent'}
-                  className="px-4 py-2 bg-[#EA4335] hover:bg-[#D93025] disabled:opacity-60 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer flex items-center gap-2"
-                >
-                  {mailStatus === 'sending' ? (
-                    <>
-                      <i className="fa-solid fa-spinner fa-spin"></i>
-                      <span>{language === 'vi' ? 'Đang gửi...' : 'Sending...'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <i className="fa-solid fa-paper-plane"></i>
-                      <span>
-                        {HAS_GOOGLE_OAUTH
-                          ? language === 'vi' ? 'Gửi email ngay' : 'Send email now'
-                          : language === 'vi' ? 'Mở Gmail soạn thư' : 'Open Gmail compose'}
-                      </span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-
           </div>
         </div>
       )}

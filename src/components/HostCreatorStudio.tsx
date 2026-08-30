@@ -58,12 +58,11 @@ export const HostCreatorStudio: React.FC<HostCreatorStudioProps> = ({
     a rejected declaration counts as no declaration, and a traveller booking is
     not asked for any of it.
 
-    Approval is deliberately NOT required. An administrator reviewing the queue
-    is a person on a schedule, and blocking every new host until someone
-    happens to look would close the platform to newcomers for no gain in
-    safety: what matters is that the details exist and are attributable.
+    Publishing is unlocked only after an administrator approves the identity.
+    The Firestore rule enforces the same boundary; this UI is only the helpful
+    explanation, not the security control.
   */
-  const identityOnFile = Boolean(identity) && identity?.status !== 'rejected';
+  const identityApproved = identity?.status === 'approved' && activeUser?.verified === true;
   const missingIdentity = [
     !identity?.fullName?.trim() && (language === 'vi' ? 'họ tên' : 'full name'),
     !identity?.cccdNumber?.trim() && (language === 'vi' ? 'số căn cước' : 'citizen ID'),
@@ -172,7 +171,7 @@ export const HostCreatorStudio: React.FC<HostCreatorStudioProps> = ({
 
     // Only for a new listing. A host whose declaration was rejected after they
     // published still has to be able to correct the tour that is already live.
-    if (!identityOnFile && !isEditing) {
+    if (!identityApproved && !isEditing) {
       onOpenVerification();
       return;
     }
@@ -635,22 +634,26 @@ export const HostCreatorStudio: React.FC<HostCreatorStudioProps> = ({
 
             {/* Publish Action */}
             <div className="pt-3 border-t border-stone-200 space-y-3">
-              {!identityOnFile && !isEditing && (
+              {!identityApproved && !isEditing && (
                 <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl space-y-2">
                   <p className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
                     <i className="fa-solid fa-id-card text-amber-600"></i>
                     {language === 'vi'
-                      ? 'Cần khai danh tính trước khi đăng tour'
-                      : 'Your identity details are needed before publishing'}
+                      ? 'Cần được admin xác minh trước khi đăng tour'
+                      : 'Admin approval is required before publishing'}
                   </p>
                   <p className="text-[11px] text-amber-900 leading-relaxed">
                     {language === 'vi'
                       ? identity?.status === 'rejected'
                         ? 'Hồ sơ trước đã bị từ chối. Hãy sửa lại rồi gửi lần nữa.'
-                        : `Còn thiếu: ${missingIdentity.join(', ')}. Khách du lịch gặp bạn một mình, nên tên, số căn cước, ngày sinh và địa chỉ phải có trước.`
+                        : identity?.status === 'pending'
+                          ? 'Hồ sơ đã gửi và đang chờ admin duyệt. Bạn chưa thể đăng tour trong thời gian này.'
+                          : `Còn thiếu: ${missingIdentity.join(', ')}. Hãy khai đầy đủ rồi chờ admin duyệt.`
                       : identity?.status === 'rejected'
                         ? 'Your previous declaration was rejected. Correct it and send it again.'
-                        : `Still missing: ${missingIdentity.join(', ')}. A traveller meets you alone, so your name, citizen ID, date of birth and address have to be on record first.`}
+                        : identity?.status === 'pending'
+                          ? 'Your application is waiting for admin approval. You cannot publish yet.'
+                          : `Still missing: ${missingIdentity.join(', ')}. Submit the form and wait for admin approval.`}
                   </p>
                   <button
                     type="button"
@@ -677,14 +680,14 @@ export const HostCreatorStudio: React.FC<HostCreatorStudioProps> = ({
                 )}
                 <button
                   type="submit"
-                  disabled={(!identityOnFile && !isEditing) || tourLanguages.length === 0}
+                  disabled={(!identityApproved && !isEditing) || tourLanguages.length === 0}
                   className="flex-1 py-3.5 bg-[#A82323] hover:bg-[#8C1818] disabled:bg-stone-300 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all cursor-pointer flex items-center justify-center gap-2"
                 >
                   <i
                     className={`fa-solid ${
                       isEditing
                         ? 'fa-floppy-disk text-amber-300'
-                        : identityOnFile
+                        : identityApproved
                           ? 'fa-cloud-arrow-up text-amber-300'
                           : 'fa-lock'
                     }`}

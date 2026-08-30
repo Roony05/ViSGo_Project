@@ -10,6 +10,7 @@ import {
   isGeminiConfigured,
 } from './server/gemini';
 import { panoramaEndpoint } from './server/panorama';
+import { bookingDeliveryEndpoint } from './server/workspace';
 
 /**
  * Mounts the ViS-Go AI endpoints on both the dev server and the preview server.
@@ -22,6 +23,7 @@ function visGoApiPlugin(): Plugin {
     server.middlewares.use('/api/rag-chat', ragChatEndpoint as never);
     server.middlewares.use('/api/translate', translateEndpoint as never);
     server.middlewares.use('/api/host-assist', hostAssistEndpoint as never);
+    server.middlewares.use('/api/booking-delivery', bookingDeliveryEndpoint as never);
     server.middlewares.use('/api/status', statusEndpoint as never);
     server.middlewares.use('/api/panorama', panoramaEndpoint as never);
   };

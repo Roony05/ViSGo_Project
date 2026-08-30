@@ -97,7 +97,7 @@ function buildEventDescription(booking: Booking, language: Language): string {
        `Số khách: ${booking.guestsCount}`,
        `Điểm hẹn: ${booking.meetingPoint}, ${booking.city}`,
        `Chỉ đường: ${mapUrl}`,
-       `Tổng thanh toán: ${booking.totalPriceVND.toLocaleString('vi-VN')} ₫`,
+       `Trả cho host khi gặp: ${booking.totalPriceVND.toLocaleString('vi-VN')} ₫`,
         booking.notes ?`Ghi chú: ${booking.notes}` : '',
         '',
         'ViS-Go không thu tiền — bạn trả trực tiếp cho host khi gặp mặt.',
@@ -113,7 +113,7 @@ function buildEventDescription(booking: Booking, language: Language): string {
        `Travellers: ${booking.guestsCount}`,
        `Meeting point: ${booking.meetingPoint}, ${booking.city}`,
        `Directions: ${mapUrl}`,
-       `Total paid: ${booking.totalPriceVND.toLocaleString('vi-VN')} VND`,
+       `Pay host when you meet: ${booking.totalPriceVND.toLocaleString('vi-VN')} VND`,
         booking.notes ?`Notes: ${booking.notes}` : '',
         '',
         'ViS-Go takes no payment — settle directly with your host when you meet.',
@@ -185,7 +185,6 @@ export async function addBookingToCalendar(
 
   try {
     const token = await getAccessToken(GOOGLE_SCOPES.calendarEvents);
-
     const response = await fetch(
       'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none',
       {

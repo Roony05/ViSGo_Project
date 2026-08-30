@@ -5,8 +5,9 @@ import { Booking } from '../types';
  * Generate a high-resolution, pixel-perfect PDF invoice with 100% accurate Vietnamese typography.
  * Uses an offscreen HTML5 canvas to render Vietnamese diacritics natively without jsPDF font corruption.
  */
-export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi' = 'vi') => {
+export const buildBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi' = 'vi'): jsPDF | null => {
   const isVi = language === 'vi';
+  const isConfirmed = booking.status === 'confirmed';
 
   // Create high-res canvas (A4 ratio: 794 x 1123 at 2x density = 1588 x 2246)
   const canvas = document.createElement('canvas');
@@ -16,7 +17,7 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   canvas.height = height;
 
   const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+  if (!ctx) return null;
 
   // Background
   ctx.fillStyle = '#FFFFFF';
@@ -52,7 +53,11 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.textAlign = 'right';
   ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 44px "Be Vietnam Pro", sans-serif';
-  ctx.fillText(isVi ? 'HÓA ĐƠN ĐẶT TOUR' : 'BOOKING RECEIPT', width - 100, 110);
+  ctx.fillText(
+    isVi ? (isConfirmed ? 'PHIẾU ĐẶT TOUR' : 'YÊU CẦU ĐẶT TOUR') : (isConfirmed ? 'BOOKING VOUCHER' : 'BOOKING REQUEST'),
+    width - 100,
+    110,
+  );
 
   ctx.fillStyle = '#FEF08A';
   ctx.font = '600 24px "Be Vietnam Pro", sans-serif';
@@ -80,7 +85,9 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.fillStyle = '#059669'; // Emerald
   ctx.font = 'bold 26px "Be Vietnam Pro", sans-serif';
   ctx.fillText(
-    isVi ? '✓ HOST ĐÃ XÁC NHẬN' : '✓ CONFIRMED BY YOUR HOST',
+    isConfirmed
+      ? (isVi ? '✓ HOST ĐÃ XÁC NHẬN' : '✓ CONFIRMED BY YOUR HOST')
+      : (isVi ? '◷ ĐANG CHỜ HOST XÁC NHẬN' : '◷ WAITING FOR HOST'),
     520,
     345
   );
@@ -257,7 +264,7 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.textAlign = 'left';
   ctx.fillStyle = '#991B1B';
   ctx.font = 'bold 32px "Be Vietnam Pro", sans-serif';
-  ctx.fillText(isVi ? 'TỔNG CỘNG THANH TOÁN' : 'TOTAL PAID AMOUNT', 140, itemY);
+  ctx.fillText(isVi ? 'SỐ TIỀN TRẢ CHO HOST' : 'AMOUNT DUE TO HOST', 140, itemY);
 
   ctx.textAlign = 'right';
   ctx.fillStyle = '#991B1B';
@@ -309,9 +316,13 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   ctx.font = 'bold 20px "Be Vietnam Pro", sans-serif';
   ctx.fillText('VIS-GO VIETNAM', width - 280, footerY + 75);
   ctx.font = 'bold 22px "Be Vietnam Pro", sans-serif';
-  ctx.fillText(isVi ? 'ĐÃ XÁC NHẬN' : 'CONFIRMED', width - 280, footerY + 110);
+  ctx.fillText(
+    isConfirmed ? (isVi ? 'ĐÃ XÁC NHẬN' : 'CONFIRMED') : (isVi ? 'ĐANG CHỜ' : 'PENDING'),
+    width - 280,
+    footerY + 110,
+  );
   ctx.font = '500 16px "Be Vietnam Pro", sans-serif';
-  ctx.fillText(isVi ? 'BỞI HOST' : 'BY YOUR HOST', width - 280, footerY + 145);
+  ctx.fillText(isConfirmed ? (isVi ? 'BỞI HOST' : 'BY YOUR HOST') : (isVi ? 'HOST PHẢN HỒI' : 'HOST RESPONSE'), width - 280, footerY + 145);
 
   // Bottom Copyright
   ctx.fillStyle = '#9CA3AF';
@@ -328,5 +339,21 @@ export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi
   });
 
   pdf.addImage(imgData, 'JPEG', 0, 0, 210, 297);
-  pdf.save(`ViSGo-HoaDon-${booking.id}.pdf`);
+  return pdf;
+};
+
+export const generateBookingInvoicePDF = (booking: Booking, language: 'en' | 'vi' = 'vi') => {
+  buildBookingInvoicePDF(booking, language)?.save(`ViSGo-Booking-${booking.id}.pdf`);
+};
+
+/** Standard base64 payload for a Gmail MIME attachment. */
+export const createBookingInvoicePdfBase64 = (booking: Booking, language: 'en' | 'vi' = 'vi'): string => {
+  const pdf = buildBookingInvoicePDF(booking, language);
+  if (!pdf) throw new Error('Could not render booking PDF');
+  const bytes = new Uint8Array(pdf.output('arraybuffer'));
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary).replace(/(.{76})/g, '$1\r\n');
 };

@@ -37,8 +37,18 @@ interface TourDetailPageProps {
     specialNotes: string;
   }) => void;
   onOpenWriteReview: (tour: Tour) => void;
-  onOpenChat?: () => void;
+  onOpenChat?: (date: string, time: string) => void;
+  onOpenCall?: (date: string, time: string) => void;
 }
+
+const localIsoDate = (daysFromToday = 0): string => {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromToday);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export const TourDetailPage: React.FC<TourDetailPageProps> = ({
   tour,
@@ -50,13 +60,12 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
   onProceedBooking,
   onOpenWriteReview,
   onOpenChat,
+  onOpenCall,
 }) => {
   const t = translations[language];
 
   const [selectedDate, setSelectedDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 2);
-    return d.toISOString().split('T')[0];
+    return localIsoDate(2);
   });
   const [selectedTime, setSelectedTime] = useState<string>('18:00');
   const [guestsCount, setGuestsCount] = useState<number>(2);
@@ -345,7 +354,7 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                   </div>
 
                   <button
-                    onClick={onOpenChat}
+                    onClick={() => onOpenChat?.(selectedDate, selectedTime)}
                     className="px-4 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-1.5 self-start sm:self-center"
                   >
                     <i className="fa-regular fa-comment-dots text-[#D4AF37]"></i>
@@ -536,7 +545,7 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                   <span className="text-xs text-stone-500 ml-1">{t.perPerson}</span>
                 </div>
                 <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  {t.instantConfirmation}
+                  {language === 'vi' ? 'Đặt trước • chờ host xác nhận' : 'Pre-reserve • host confirms'}
                 </span>
               </div>
 
@@ -550,6 +559,8 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                     <span className="text-[10px] text-stone-500 block mb-1">{t.dateLabel}</span>
                     <input
                       type="date"
+                      lang={language === 'vi' ? 'vi-VN' : 'en-US'}
+                      min={localIsoDate()}
                       value={selectedDate}
                       onChange={(e) => setSelectedDate(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 font-semibold focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
@@ -562,13 +573,36 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                       onChange={(e) => setSelectedTime(e.target.value)}
                       className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs text-stone-800 font-semibold focus:outline-hidden focus:ring-2 focus:ring-[#A82323] cursor-pointer"
                     >
-                      <option value="08:00">08:00 AM (Morning)</option>
-                      <option value="11:30">11:30 AM (Lunch)</option>
-                      <option value="15:00">03:00 PM (Afternoon)</option>
-                      <option value="18:00">06:00 PM (Evening Tour)</option>
-                      <option value="19:30">07:30 PM (Night Life)</option>
+                      <option value="08:00">{language === 'vi' ? '08:00 (Buổi sáng)' : '08:00 AM (Morning)'}</option>
+                      <option value="11:30">{language === 'vi' ? '11:30 (Buổi trưa)' : '11:30 AM (Lunch)'}</option>
+                      <option value="15:00">{language === 'vi' ? '15:00 (Buổi chiều)' : '03:00 PM (Afternoon)'}</option>
+                      <option value="18:00">{language === 'vi' ? '18:00 (Buổi tối)' : '06:00 PM (Evening)'}</option>
+                      <option value="19:30">{language === 'vi' ? '19:30 (Tour đêm)' : '07:30 PM (Night tour)'}</option>
                     </select>
                   </div>
+                </div>
+                <p className="text-[11px] text-stone-500">
+                  <i className="fa-regular fa-calendar-check mr-1 text-[#A82323]"></i>
+                  {language === 'vi'
+                    ? `Bạn đang chọn ${selectedDate.split('-').reverse().join('/')} lúc ${selectedTime} (giờ Việt Nam).`
+                    : `Selected: ${selectedDate} at ${selectedTime} (Vietnam time).`}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2">
+                <p className="text-[11px] leading-relaxed text-amber-950">
+                  <i className="fa-solid fa-lightbulb mr-1.5 text-amber-600"></i>
+                  {language === 'vi'
+                    ? 'Nên nhắn tin hoặc gọi cho host trước để thống nhất ngày, giờ và điểm gặp rồi mới đặt chỗ trước.'
+                    : 'Message or call the host first to agree on the date, time and meeting point before reserving.'}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => onOpenChat?.(selectedDate, selectedTime)} className="py-2 rounded-lg bg-white border border-amber-300 text-[11px] font-bold text-stone-800 hover:bg-amber-100 cursor-pointer">
+                    <i className="fa-regular fa-comments mr-1.5"></i>{language === 'vi' ? 'Nhắn host' : 'Message host'}
+                  </button>
+                  <button type="button" onClick={() => onOpenCall?.(selectedDate, selectedTime)} className="py-2 rounded-lg bg-stone-900 text-[11px] font-bold text-white hover:bg-stone-700 cursor-pointer">
+                    <i className="fa-solid fa-phone mr-1.5"></i>{language === 'vi' ? 'Gọi host' : 'Call host'}
+                  </button>
                 </div>
               </div>
 
@@ -684,11 +718,25 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                 </div>
               </div>
 
+              {/* A slot already held by someone else. The reservation is a
+                  transaction that would refuse this anyway; saying so here
+                  beats letting the traveller fill the form and be turned away
+                  at the last step. */}
+              {tour.status !== 'active' && (
+                <p className="mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
+                  <i className="fa-solid fa-circle-info mr-1.5"></i>
+                  {language === 'vi'
+                    ? 'Chỗ này đang được giữ cho một khách khác. Bạn vẫn có thể nhắn hoặc gọi host để hỏi lịch khác.'
+                    : 'This slot is currently held for another traveller. You can still message or call the host about other dates.'}
+                </p>
+              )}
+
               {/* Action Button: Reserve */}
               <button
                 type="button"
                 onClick={handleReserve}
-                className="w-full py-3.5 bg-gradient-to-r from-[#A82323] to-[#8C1818] hover:from-[#8C1818] hover:to-[#6E0E0E] text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all transform active:scale-98 cursor-pointer flex items-center justify-center gap-2"
+                disabled={tour.status !== 'active'}
+                className="w-full py-3.5 bg-gradient-to-r from-[#A82323] to-[#8C1818] hover:from-[#8C1818] hover:to-[#6E0E0E] disabled:from-stone-300 disabled:to-stone-300 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold rounded-xl shadow-lg transition-all transform active:scale-98 cursor-pointer flex items-center justify-center gap-2"
               >
                 {/*
                   Say up front that an account is needed. Letting a visitor pick
@@ -697,11 +745,13 @@ export const TourDetailPage: React.FC<TourDetailPageProps> = ({
                 */}
                 <i className={`fa-solid ${activeUser ? 'fa-shield-heart' : 'fa-user-plus'} text-amber-300`}></i>
                 <span>
-                  {activeUser
-                    ? t.proceedCheckout
-                    : language === 'vi'
-                      ? 'Tạo tài khoản để đặt tour'
-                      : 'Create an account to book'}
+                  {tour.status !== 'active'
+                    ? language === 'vi' ? 'Đã có khách giữ chỗ' : 'Already reserved'
+                    : activeUser
+                      ? t.proceedCheckout
+                      : language === 'vi'
+                        ? 'Tạo tài khoản để đặt tour'
+                        : 'Create an account to book'}
                 </span>
               </button>
 

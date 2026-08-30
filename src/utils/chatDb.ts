@@ -87,6 +87,7 @@ export async function openConversation(
     return {
       id: snap.id,
       bookingId: booking.id,
+      tourId: (data.tourId as string) ?? booking.tourId,
       participants: (data.participants as string[]) ?? [],
       tourTitle: (data.tourTitle as string) ?? booking.tourTitle,
       city: (data.city as string) ?? booking.city,
@@ -105,11 +106,25 @@ export async function openConversation(
   if (!mayCreate) return null;
 
   const participants = [booking.customerId, booking.hostId];
+  const parties = {
+    customerId: booking.customerId,
+    hostId: booking.hostId,
+    customerName: booking.customerName,
+    hostName: booking.hostName,
+    // A reference like `avatar:<uid>:<v>` or a URL is welcome here; an inlined
+    // base64 portrait is not, and dropping it costs only the thumbnail.
+    hostAvatar: (booking.hostAvatar ?? '').length <= 512 ? booking.hostAvatar ?? '' : '',
+    hostPhone: booking.hostPhone ?? '',
+    bookingDate: booking.bookingDate,
+    bookingTime: booking.bookingTime,
+  };
   await setDoc(ref, {
     bookingId: booking.id,
+    tourId: booking.tourId,
     participants,
     tourTitle: booking.tourTitle,
     city: booking.city,
+    ...parties,
     lastMessage: '',
     lastSenderId: '',
     lastMessageAt: serverTimestamp(),
@@ -120,14 +135,75 @@ export async function openConversation(
   return {
     id: booking.id,
     bookingId: booking.id,
+    tourId: booking.tourId,
     participants,
     tourTitle: booking.tourTitle,
     city: booking.city,
+    ...parties,
     lastMessage: '',
     lastSenderId: '',
     lastMessageAt: null,
     lastReadAt: {},
   };
+}
+
+/**
+ * Every thread this user belongs to, live.
+ *
+ * The host inbox exists because a traveller may now write *before* reserving,
+ * to agree a date. That thread has no booking row behind it, so the host's
+ * booking list cannot surface it and the message would arrive nowhere.
+ *
+ * No `orderBy` on the query: pairing `array-contains` with a sort on another
+ * field needs a composite index, and a signed-in user has a handful of threads.
+ * Sorting the page in memory costs nothing and keeps deployment to rules alone.
+ */
+export async function subscribeUserConversations(
+  uid: string,
+  onRows: (rows: Conversation[]) => void,
+  onError?: (err: unknown) => void,
+): Promise<() => void> {
+  const fb = await getFirebase();
+  if (!fb) return () => undefined;
+
+  const { collection, onSnapshot, query, where } = await import('firebase/firestore');
+  return onSnapshot(
+    query(collection(fb.db, COLLECTION), where('participants', 'array-contains', uid)),
+    (snap) => {
+      const rows = snap.docs.map((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const participants = (data.participants as string[]) ?? [];
+        return {
+          id: d.id,
+          bookingId: (data.bookingId as string) ?? d.id,
+          tourId: data.tourId as string | undefined,
+          participants,
+          tourTitle: (data.tourTitle as string) ?? '',
+          city: (data.city as string) ?? '',
+          lastMessage: (data.lastMessage as string) ?? '',
+          lastSenderId: (data.lastSenderId as string) ?? '',
+          lastMessageAt: toDate(data.lastMessageAt),
+          lastReadAt: Object.fromEntries(
+            Object.entries((data.lastReadAt as Record<string, unknown>) ?? {}).map(([who, at]) => [
+              who,
+              toDate(at),
+            ]),
+          ),
+          customerId: (data.customerId as string) ?? participants[0],
+          hostId: (data.hostId as string) ?? participants[1],
+          customerName: data.customerName as string | undefined,
+          hostName: data.hostName as string | undefined,
+          hostAvatar: data.hostAvatar as string | undefined,
+          hostPhone: data.hostPhone as string | undefined,
+          bookingDate: data.bookingDate as string | undefined,
+          bookingTime: data.bookingTime as string | undefined,
+        } satisfies Conversation;
+      });
+      rows.sort((a, b) => (b.lastMessageAt?.getTime() ?? 0) - (a.lastMessageAt?.getTime() ?? 0));
+      onRows(rows);
+    },
+    (err) => onError?.(err),
+  );
 }
 
 /* ------------------------------------------------------------------ */

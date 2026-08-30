@@ -288,7 +288,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
           </button>
 
-          {/* 4. Chat Messages */}
+          {activeUser?.role === 'customer' ? (
+          <button
+            onClick={() => handleNavClick('host-ranking')}
+            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${activeTab === 'host-ranking' ? 'bg-[#991B1B] text-white shadow-sm' : 'text-stone-300 hover:bg-stone-800/80 hover:text-white'}`}
+          >
+            <div className="flex items-center gap-2.5">
+              <i className="fa-solid fa-ranking-star text-sm text-amber-400"></i>
+              <span>{isVi ? 'Xếp hạng Host' : 'Host Leaderboard'}</span>
+            </div>
+            <i className="fa-solid fa-angle-right text-[10px] opacity-50"></i>
+          </button>
+          ) : (
           <button
             onClick={() => {
               sounds.playTap();
@@ -302,6 +313,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>{isVi ? 'Tin nhắn' : 'Messages'}</span>
             </div>
           </button>
+          )}
           </>
           )}
 
@@ -370,4 +382,3 @@ export const Sidebar: React.FC<SidebarProps> = ({
     </>
   );
 };
-

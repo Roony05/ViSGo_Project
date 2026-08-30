@@ -4,7 +4,8 @@
 
 | | |
 |---|---|
-| **Live demo (Cloud Run)** | `https://visgo-api-________.a.run.app` ← điền sau khi chạy `npm run deploy:api` |
+| **Live demo (Netlify)** | https://vis-go-ai-riser.netlify.app |
+| **Cloud Run bonus** | Chưa có do tài khoản Google Cloud không hoàn tất được billing; không ảnh hưởng điều kiện nộp, nhưng không nhận 10 điểm bonus Cloud Run |
 | **Google AI Studio** | `________` ← **bắt buộc**, mở project AI Studio → Share → copy link |
 | **Demo video (YouTube)** | `________` ← công khai, tối đa 2 phút |
 | **LinkedIn** | `________` ← công khai, `#AIRiserVietnam #BuildwithGoogleAI` |
@@ -45,20 +46,20 @@ Bảng này chỉ liệt kê thứ đã được cấu hình và hoạt động.
 | 4 | **Firebase Authentication** | Đăng nhập khách / host / admin | `src/utils/firebaseAuth.ts` |
 | 5 | **Cloud Firestore** | Tour, booking, hội thoại, đánh giá, hồ sơ định danh — kèm security rules 400+ dòng | `firestore.rules`, `src/utils/firestoreDb.ts` |
 | 6 | **Firebase App Check** | reCAPTCHA v3 chặn người lạ gọi ké quota AI | `src/config/firebase.ts` |
-| 7 | **Firebase Hosting** | Bản deploy song song | `firebase.json`, `.firebaserc` |
-| 8 | **Google Cloud Run** | **Toàn bộ ứng dụng** (SPA + API) trong một container, scale-to-zero | `Dockerfile`, `scripts/deploy-cloudrun.sh` |
+| 7 | **Google Workspace integration (fallback)** | Tạo nội dung Gmail và Google Calendar để người dùng xác nhận thủ công, không cần billing | `src/utils/googleGmail.ts`, `src/utils/calendar.ts` |
 
-**Tám công nghệ, không phải mười một.** Ba thứ dưới đây có code hoàn chỉnh trong repo
-nhưng **chưa bật**, và bài nộp không kể chúng vào:
+Các tích hợp dưới đây có code trong repo nhưng **chưa được cấu hình OAuth/server production**,
+vì vậy không mô tả chúng là gửi tự động trong bài nộp:
 
 | Công nghệ | Vì sao chưa bật | Ứng dụng chạy thế nào thay thế |
 |---|---|---|
-| Gmail API | Cần `VITE_GOOGLE_CLIENT_ID` (chưa tạo) | Mở cửa sổ soạn thư Gmail điền sẵn, khách bấm Gửi — `src/utils/googleGmail.ts` |
-| Google Calendar API | Cùng lý do | Tải file `.ics`, mở được bằng mọi lịch — `src/utils/calendar.ts` |
+| Gmail / Gmail API | Chưa có OAuth client và refresh token Workspace trên Netlify | Mở cửa sổ soạn thư Gmail điền sẵn để người dùng kiểm tra và bấm Gửi |
+| Google Calendar API | Chưa có OAuth client và refresh token Workspace trên Netlify | Mở mẫu sự kiện Google Calendar để khách tự xác nhận lưu lịch |
 | Google Maps JS API | Cần bật billing, mà dự án cố ý ở mức chi phí $0 | Leaflet + OpenStreetMap, cùng tính năng bản đồ — `src/components/RadarMap.tsx` |
+| Google Cloud Run | Tài khoản không hoàn tất được bước billing | Netlify Free đang phục vụ SPA và serverless API |
 
-Cả ba đều là **chuyển mạch một dòng env**: điền client ID hoặc bật `VITE_ALLOW_PAID_APIS`
-là code có sẵn tự chạy. Chúng được viết để hỏng êm chứ không hỏng ồn.
+Các nhánh này được viết để hỏng êm: booking vẫn được lưu và khóa tour; người dùng vẫn có
+PDF, Gmail compose và Calendar template thay vì thấy lỗi kỹ thuật.
 
 ---
 
@@ -76,7 +77,7 @@ sẽ đi tới một địa chỉ không có ai đợi.
 ### 2. Ba tầng dự phòng — chatbot không bao giờ chết
 
 ```
-Firebase AI Logic  →  /api/rag-chat (Cloud Run)  →  engine RAG chạy trong trình duyệt
+Firebase AI Logic  →  /api/rag-chat (Netlify Function)  →  engine RAG chạy trong trình duyệt
 ```
 
 Mỗi tầng hỏng thì tầng sau đỡ. Tầng cuối không cần mạng, không cần khoá, không cần server.
@@ -97,10 +98,9 @@ Gemini — vốn đọc được thứ tiếng đó và có cùng bộ luật tr
 
 ## Về chi phí và quyền riêng tư
 
-- **Chốt chi tiêu tự viết trong server**: 12 lượt/IP/phút và 800 lượt/ngày
-  (`server/gemini.ts`). Cloud Run chạy `--max-instances=1` nên bộ đếm trong RAM là con số
-  thật, không phải con số nhân với số instance.
-- **Cloud Run scale-to-zero**: không ai truy cập thì không container nào chạy.
+- **Chốt sử dụng tự viết trong server**: 12 lượt/IP/phút và 800 lượt/ngày
+  (`server/gemini.ts`). Gemini đang dùng Free tier và Netlify đang dùng Free plan.
+- **Netlify Function theo nhu cầu**: API chỉ được gọi khi người dùng dùng tính năng AI.
 - **Không lưu ảnh giấy tờ tuỳ thân.** Từ 01/01/2026, Nghị định 356/2025/NĐ-CP xếp ảnh chụp
   thẻ căn cước vào dữ liệu cá nhân nhạy cảm. Hệ thống chỉ lưu thông tin host tự khai và
   đưa cho quản trị viên xem, không lưu ảnh — huy hiệu xác minh vì thế được ghi rõ nghĩa là

@@ -30,6 +30,8 @@ interface ChatDrawerProps {
   booking: Booking | null;
   language: Language;
   onClose: () => void;
+  /** Opens the existing in-app call immediately when the user chose “Call host”. */
+  startWithCall?: boolean;
 }
 
 export const ChatDrawer: React.FC<ChatDrawerProps> = ({
@@ -38,6 +40,7 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
   booking,
   language,
   onClose,
+  startWithCall = false,
 }) => {
   const t = translations[language];
   const isVi = language === 'vi';
@@ -89,6 +92,10 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
     see callBudget.ts — so there is no state to keep once it closes.
   */
   const [callOpen, setCallOpen] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && startWithCall && booking && activeUser) setCallOpen(true);
+  }, [isOpen, startWithCall, booking, activeUser]);
 
   /**
    * Who you are talking to. A traveller sees their host and a host sees their
@@ -292,8 +299,8 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               <p className="text-[11px] text-amber-200/90 truncate">
                 {booking
                   ? isVi
-                    ? `Chuyến ${booking.id} • ${booking.city}`
-                    : `Trip ${booking.id} • ${booking.city}`
+                    ? `${booking.id.startsWith('contact_') ? 'Trao đổi trước khi đặt' : `Chuyến ${booking.id}`} • ${booking.city}`
+                    : `${booking.id.startsWith('contact_') ? 'Pre-booking conversation' : `Trip ${booking.id}`} • ${booking.city}`
                   : isVi
                     ? 'Chưa có chuyến đi nào'
                     : 'No trip yet'}
@@ -406,7 +413,9 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
 
               <div className="text-center my-2">
                 <span className="px-3 py-1 bg-stone-200 text-stone-600 rounded-full text-[10px] font-semibold">
-                  {booking.bookingDate} • ViS-Go Protected Chat
+                  {booking.id.startsWith('contact_')
+                    ? (isVi ? 'Trao đổi lịch trình trước khi đặt chỗ' : 'Discuss the itinerary before reserving')
+                    : booking.bookingDate} • ViS-Go Chat
                 </span>
               </div>
 

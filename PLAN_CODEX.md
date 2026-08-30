@@ -16,12 +16,14 @@ Mọi quyết định kỹ thuật dưới đây phục vụ thể lệ đó. Tr
 
 > **Bronze Tier: Open to All (No limit)**
 > To unlock this tier and become eligible for ranking, ensure you submit the Completion Form including:
+>
 > - The App Link: A Google AI Studio share link.
 > - A Demo Video: A public YouTube video link of your demo (maximum 2 minutes).
 > - The LinkedIn Post: A link to your public post sharing your project.
 > - [Optional] A live Google Cloud Run or Google Play Link.
 >
 > **Silver Tier: Top 500 LeaderBoard** — ranked by score:
+>
 > - **Idea Evaluation**: Up to **100 points** — creativity, feasibility, potential impact.
 > - **Google Tech Integration**: Up to **10 extra points** — "depending on the **depth, effectiveness, and proper utilization** of Google technologies including but not limited to Gemini, Firebase, Maps, and Workspace".
 > - **Deployment**: **10 extra points** — "if there is a **live, deployed solution link that is accessible by the public**. For web apps, the solution **must be hosted on Google Cloud Run only**."
@@ -34,13 +36,13 @@ Hôm nay là **29/08/2026**. Còn khoảng **30 giờ**.
 **Đây là ràng buộc chi phối toàn bộ kế hoạch.** Plan này có 5 Phase, và trong 30 giờ
 không làm hết được. Vì vậy chúng được xếp theo **điểm thu về trên mỗi giờ bỏ ra**:
 
-| Thứ tự | Phase | Đổi lấy gì | Ước tính | Bỏ qua được không |
-|---|---|---|---|---|
-| **1** | **Phase 0 — Deploy + nộp bài** | **Tư cách dự thi + 10 điểm Deployment** | 2-4 giờ | ❌ **Không.** Không nộp form = không được chấm |
-| 2 | Phase 3 — Chatbot đa ngôn ngữ | Idea Evaluation + Tech Integration | 1-2 giờ | ✅ Được |
-| 3 | Phase 2 — Bỏ lọc video | Idea Evaluation | 30 phút | ✅ Được |
-| 4 | Phase 1 — Form + bộ lọc + AI host | Idea Evaluation (mạnh nhất) | 6-10 giờ | ✅ Được |
-| 5 | Phase 4 — 5 lớp chặn chi phí | Không có điểm. Bảo vệ ví bạn. | 1 giờ | ⚠️ Xem §0.5 |
+| Thứ tự    | Phase                                   | Đổi lấy gì                                     | Ước tính | Bỏ qua được không                                      |
+| ----------- | --------------------------------------- | -------------------------------------------------- | ----------- | ----------------------------------------------------------- |
+| **1** | **Phase 0 — Deploy + nộp bài** | **Tư cách dự thi + 10 điểm Deployment** | 2-4 giờ    | ❌**Không.** Không nộp form = không được chấm |
+| 2           | Phase 3 — Chatbot đa ngôn ngữ       | Idea Evaluation + Tech Integration                 | 1-2 giờ    | ✅ Được                                                  |
+| 3           | Phase 2 — Bỏ lọc video               | Idea Evaluation                                    | 30 phút    | ✅ Được                                                  |
+| 4           | Phase 1 — Form + bộ lọc + AI host    | Idea Evaluation (mạnh nhất)                      | 6-10 giờ   | ✅ Được                                                  |
+| 5           | Phase 4 — 5 lớp chặn chi phí        | Không có điểm. Bảo vệ ví bạn.              | 1 giờ      | ⚠️ Xem §0.5                                              |
 
 > **Luật cứng cho Codex: KHÔNG bắt đầu Phase 1 khi Phase 0 chưa xong và chưa nộp form.**
 > Một app đẹp hơn nhưng chưa nộp được 0 điểm. Một app như hôm nay nhưng đã deploy và nộp
@@ -53,11 +55,11 @@ không làm hết được. Vì vậy chúng được xếp theo **điểm thu v
 
 Đọc kỹ hai dòng bonus — chúng khác nhau về bản chất và người ta hay đọc nhầm thành một:
 
-| | Google Tech Integration (≤10đ) | Deployment (10đ) |
-|---|---|---|
-| Cách chấm | **Thang trượt** — "depending on the depth, effectiveness, and proper utilization" | **Có/Không** — "if there is a live, deployed solution link" |
-| Ăn điểm bằng gì | Dùng Gemini/Firebase/Maps/Workspace càng sâu càng nhiều điểm | Chỉ cần **một link chạy được, công khai** |
-| Cloud Run có liên quan? | ❌ Không. Đây là điểm cho **tính năng**. | ✅ Đây mới là chỗ Cloud Run nằm |
+|                           | Google Tech Integration (≤10đ)                                                           | Deployment (10đ)                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Cách chấm               | **Thang trượt** — "depending on the depth, effectiveness, and proper utilization" | **Có/Không** — "if there is a live, deployed solution link" |
+| Ăn điểm bằng gì      | Dùng Gemini/Firebase/Maps/Workspace càng sâu càng nhiều điểm                        | Chỉ cần**một link chạy được, công khai**               |
+| Cloud Run có liên quan? | ❌ Không. Đây là điểm cho**tính năng**.                                      | ✅ Đây mới là chỗ Cloud Run nằm                                |
 
 Chữ "depth, effectiveness" thuộc về **Tech Integration**, không thuộc về **Deployment**.
 Deployment chỉ đòi ba thứ:
@@ -87,11 +89,11 @@ link nộp là `https://visgo-api-xxxxx.a.run.app`.
 **Giá phải trả:** băng thông ra Internet của Cloud Run chỉ miễn phí 1 GiB/tháng và chỉ ở
 Bắc Mỹ, nên bundle sẽ tính tiền. Con số thật:
 
-| Lưu lượng chấm thi | Egress | Tiền |
-|---|---|---|
-| 500 lượt xem | 0,75 GB | **~$0,09** |
-| 2.000 lượt | 3 GB | ~$0,36 |
-| 10.000 lượt | 15 GB | ~$1,80 |
+| Lưu lượng chấm thi | Egress  | Tiền            |
+| ---------------------- | ------- | ---------------- |
+| 500 lượt xem         | 0,75 GB | **~$0,09** |
+| 2.000 lượt           | 3 GB    | ~$0,36           |
+| 10.000 lượt          | 15 GB   | ~$1,80           |
 
 **Chín cent đổi lấy 10 điểm.** Đây là đánh đổi đúng, và §0.5 dưới đây khiến ngay cả chín
 cent đó cũng bằng 0.
@@ -140,17 +142,17 @@ Hạng mục **Google Tech Integration (≤10đ)** chấm theo *chiều sâu*. D
 **5 nhóm công nghệ Google**, phần lớn đã hoạt động — đây là điểm đang có sẵn mà không nộp
 thì phí:
 
-| Công nghệ Google | Dùng ở đâu trong repo |
-|---|---|
-| **Gemini** | `server/gemini.ts` (RAG chat + soạn bài), `src/utils/firebaseAi.ts` (Firebase AI Logic) |
-| **Firebase** | Auth (`firebaseAuth.ts`), Firestore (`firestoreDb.ts`), Hosting, App Check |
-| **Maps / vị trí** | `googleMaps.ts`, `placeLookup.ts`, `RadarMap.tsx`, chia sẻ vị trí trực tiếp |
-| **Workspace** | `googleGmail.ts` (gửi xác nhận), `calendar.ts` (thêm lịch chuyến đi) |
-| **Cloud Run** | Phase 0 dưới đây |
+| Công nghệ Google        | Dùng ở đâu trong repo                                                                     |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| **Gemini**          | `server/gemini.ts` (RAG chat + soạn bài), `src/utils/firebaseAi.ts` (Firebase AI Logic) |
+| **Firebase**        | Auth (`firebaseAuth.ts`), Firestore (`firestoreDb.ts`), Hosting, App Check                |
+| **Maps / vị trí** | `googleMaps.ts`, `placeLookup.ts`, `RadarMap.tsx`, chia sẻ vị trí trực tiếp        |
+| **Workspace**       | `googleGmail.ts` (gửi xác nhận), `calendar.ts` (thêm lịch chuyến đi)               |
+| **Cloud Run**       | Phase 0 dưới đây                                                                          |
 
 Codex nên viết một file `SUBMISSION.md` liệt kê bảng này để chủ dự án dán vào form —
 xem Phase 0 bước P0.7.
----
+------------------------
 
 # PHASE 0 — Deploy lên Cloud Run và nộp bài ⏰ LÀM TRƯỚC MỌI THỨ
 
@@ -487,13 +489,13 @@ echo "════════════════════════�
 
 **Từng cờ, và vì sao — đây là phần quyết định $0:**
 
-| Cờ | Lý do |
-|---|---|
-| `--min-instances=0` | Không request thì không container nào chạy → 0 giây tính tiền. Đặt ≥1 là **~$60/tháng** |
-| `--max-instances=1` | Trần chi tiêu cứng, **và** làm bộ chặn 800 lượt/ngày trong `server/gemini.ts` thành con số thật (nó đếm trong RAM của tiến trình) |
-| `--cpu-throttling` | Chỉ cấp CPU lúc xử lý request. Tắt đi là tính tiền cả lúc rảnh |
-| `--timeout=30s` | Mặc định 300s: một request treo đốt 300 giây vCPU. `generate()` đã tự có ngân sách ~12s |
-| `--allow-unauthenticated` | **Bắt buộc.** Thể lệ đòi link "accessible by the public" — thiếu cờ này là mất 10 điểm |
+| Cờ                         | Lý do                                                                                                                                                      |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--min-instances=0`       | Không request thì không container nào chạy → 0 giây tính tiền. Đặt ≥1 là**~$60/tháng**                                                  |
+| `--max-instances=1`       | Trần chi tiêu cứng,**và** làm bộ chặn 800 lượt/ngày trong `server/gemini.ts` thành con số thật (nó đếm trong RAM của tiến trình) |
+| `--cpu-throttling`        | Chỉ cấp CPU lúc xử lý request. Tắt đi là tính tiền cả lúc rảnh                                                                                 |
+| `--timeout=30s`           | Mặc định 300s: một request treo đốt 300 giây vCPU.`generate()` đã tự có ngân sách ~12s                                                       |
+| `--allow-unauthenticated` | **Bắt buộc.** Thể lệ đòi link "accessible by the public" — thiếu cờ này là mất 10 điểm                                                  |
 
 **Khoá để trong `--set-env-vars`, không dùng Secret Manager** (chỉ miễn phí 6 phiên bản,
 mỗi lần đổi khoá là một phiên bản mới còn active). Env var của Cloud Run miễn phí và không
@@ -851,13 +853,13 @@ export function tourSpeaks(tour: Tour, code: string): boolean {
 
 ### 1.5.2. Gộp cặp state chữ
 
-| Cũ | Mới |
-|----|-----|
-| `titleVi`, `titleEn` | `title` |
-| `taglineVi`, `taglineEn` | `tagline` |
+| Cũ                                    | Mới             |
+| -------------------------------------- | ---------------- |
+| `titleVi`, `titleEn`               | `title`        |
+| `taglineVi`, `taglineEn`           | `tagline`      |
 | `meetingPointVi`, `meetingPointEn` | `meetingPoint` |
-| `includedVi`, `includedEn` | `included` |
-| `descriptionVi`, `descriptionEn` | `description` |
+| `includedVi`, `includedEn`         | `included`     |
+| `descriptionVi`, `descriptionEn`   | `description`  |
 
 Khởi tạo khi **sửa** tour: `editingTour?.titleVi || editingTour?.title || ''`
 (ưu tiên `titleVi` vì row cũ luôn có nó — kể cả tour `audience: 'en'`, vì `pair()` đời cũ
@@ -1286,11 +1288,11 @@ export const hostAssistEndpoint =
 
 ### Đăng ký endpoint ở **cả ba** chỗ
 
-| File | Sửa gì |
-|------|--------|
-| `server/index.ts` | thêm vào import + `app.post('/api/host-assist', hostAssistEndpoint);` |
-| `vite.config.ts` | thêm vào import + `server.middlewares.use('/api/host-assist', hostAssistEndpoint as never);` trong `mount()` |
-| `netlify/functions/api.mts` | thêm vào import + `'/api/host-assist': hostAssistEndpoint as Handler` trong `ROUTES` |
+| File                          | Sửa gì                                                                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `server/index.ts`           | thêm vào import +`app.post('/api/host-assist', hostAssistEndpoint);`                                          |
+| `vite.config.ts`            | thêm vào import +`server.middlewares.use('/api/host-assist', hostAssistEndpoint as never);` trong `mount()` |
+| `netlify/functions/api.mts` | thêm vào import +`'/api/host-assist': hostAssistEndpoint as Handler` trong `ROUTES`                         |
 
 ## 1.8. Chỗ khác chịu ảnh hưởng
 
@@ -1311,15 +1313,15 @@ export const hostAssistEndpoint =
 Nhỏ và độc lập. Video giới thiệu địa phương là hình ảnh một vùng đất; giấu nó khỏi một nửa
 số khách vì họ đang xem giao diện tiếng Anh là mất mát không đổi lại được gì.
 
-| File | Thay đổi |
-|------|----------|
-| `src/types/index.ts` | Xoá field `language: Language` khỏi `interface LocalVideo`. |
-| `src/utils/contentLanguage.ts` | `videoMatchesLanguage` đã bị xoá ở Phase 1. |
-| `src/App.tsx` | `languageVideos` đã bị bỏ ở Phase 1; truyền thẳng `localVideos`. |
-| `src/components/LocalVideoManager.tsx` | Xoá state `contentLanguage` (dòng ~48) và comment của nó; xoá `language: contentLanguage` trong object `onSave` (dòng ~115); xoá cả khối `<select id="video-language">` (dòng ~211-230). Bỏ `Language` khỏi import nếu không còn dùng. |
-| `src/components/AdminDashboard.tsx` | Xoá `videoSplit` (dòng ~124-131) và biểu đồ dùng nó. |
-| `seed/fixtures.ts` | Xoá field `language: 'en'` khỏi các object video (dòng ~901 trở đi). |
-| `scripts/videos.test.mjs` | Kiểm tra có assertion nào về field `language` không; có thì xoá. |
+| File                                     | Thay đổi                                                                                                                                                                                                                                                       |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/types/index.ts`                   | Xoá field`language: Language` khỏi `interface LocalVideo`.                                                                                                                                                                                                 |
+| `src/utils/contentLanguage.ts`         | `videoMatchesLanguage` đã bị xoá ở Phase 1.                                                                                                                                                                                                               |
+| `src/App.tsx`                          | `languageVideos` đã bị bỏ ở Phase 1; truyền thẳng `localVideos`.                                                                                                                                                                                      |
+| `src/components/LocalVideoManager.tsx` | Xoá state`contentLanguage` (dòng ~48) và comment của nó; xoá `language: contentLanguage` trong object `onSave` (dòng ~115); xoá cả khối `<select id="video-language">` (dòng ~211-230). Bỏ `Language` khỏi import nếu không còn dùng. |
+| `src/components/AdminDashboard.tsx`    | Xoá`videoSplit` (dòng ~124-131) và biểu đồ dùng nó.                                                                                                                                                                                                    |
+| `seed/fixtures.ts`                     | Xoá field`language: 'en'` khỏi các object video (dòng ~901 trở đi).                                                                                                                                                                                      |
+| `scripts/videos.test.mjs`              | Kiểm tra có assertion nào về field`language` không; có thì xoá.                                                                                                                                                                                        |
 
 > Document video cũ trong Firestore vẫn còn field `language`. **Không cần migration** — nó
 > chỉ nằm đó, không ai đọc, và bị ghi đè lần admin sửa video tiếp theo.
@@ -1331,6 +1333,7 @@ số khách vì họ đang xem giao diện tiếng Anh là mất mát không đ�
 ## 3.1. Vấn đề hiện tại
 
 `ragEngine.queryRag()` nhận `language: Language` = **locale của giao diện**, rồi:
+
 - dựng prompt `Always reply in ${langName}` (`server/gemini.ts:203`),
 - dựng câu từ chối off-topic bằng `isVi` (`ragEngine.ts:813`),
 - dựng nhãn action item bằng `isVi` (`ragEngine.ts:781`),
@@ -1492,13 +1495,13 @@ Rồi:
 
 ## 3.6. Kiểm thử tay
 
-| Gõ vào chatbot | Phải nhận được |
-|----------------|----------------|
-| `có tour ẩm thực Hà Nội không?` (site EN) | trả lời **tiếng Việt** |
-| `any street food tours in Hanoi?` (site VI) | trả lời **tiếng Anh** |
-| `ハノイの食べ歩きツアーはありますか？` | trả lời **tiếng Nhật**, không bị từ chối off-topic |
-| `giá bitcoin hôm nay` | vẫn từ chối, bằng tiếng Việt |
-| `what is the capital of France` | vẫn từ chối, bằng tiếng Anh |
+| Gõ vào chatbot                                  | Phải nhận được                                             |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| `có tour ẩm thực Hà Nội không?` (site EN) | trả lời**tiếng Việt**                                 |
+| `any street food tours in Hanoi?` (site VI)     | trả lời**tiếng Anh**                                   |
+| `ハノイの食べ歩きツアーはありますか？`          | trả lời**tiếng Nhật**, không bị từ chối off-topic |
+| `giá bitcoin hôm nay`                         | vẫn từ chối, bằng tiếng Việt                              |
+| `what is the capital of France`                 | vẫn từ chối, bằng tiếng Anh                                |
 
 ---
 
@@ -1516,11 +1519,11 @@ vì nó phải có mặt từ lệnh tạo repo, không thể để sau.
 
 ## 4.0. Bao nhiêu là đủ, tuỳ vào loại billing account
 
-| | Free Trial billing account | Paid billing account |
-|---|---|---|
-| Rủi ro tối đa | **App dừng chạy.** Google không tự trừ thẻ (§0.5) | Hoá đơn thật |
-| Phase này | Nên làm | **Bắt buộc** |
-| Nếu sát giờ nộp bài | Có thể hoãn tới sau khi nộp | Làm Lớp 2+3 **trước** khi đi ngủ |
+|                          | Free Trial billing account                                     | Paid billing account                        |
+| ------------------------ | -------------------------------------------------------------- | ------------------------------------------- |
+| Rủi ro tối đa         | **App dừng chạy.** Google không tự trừ thẻ (§0.5) | Hoá đơn thật                            |
+| Phase này               | Nên làm                                                      | **Bắt buộc**                        |
+| Nếu sát giờ nộp bài | Có thể hoãn tới sau khi nộp                               | Làm Lớp 2+3**trước** khi đi ngủ |
 
 ## 4.1. Lớp 1 — Cleanup policy Artifact Registry ✅ đã làm ở Phase 0
 
@@ -1638,11 +1641,11 @@ curl -s $URL/api/status | jq '.spendGuard'
 
 ## 4.5. Lớp 5 — Biết rằng Blaze không còn phanh cứng
 
-| | Spark (trước) | Blaze (sau khi bật billing) |
-|---|---|---|
-| Firestore free | 50k đọc + 20k ghi/ngày | **giống hệt** |
-| Hosting free | 10 GB + 360 MB/ngày | **giống hệt** |
-| Vượt quota | ⛔ App báo lỗi. Không thể có hoá đơn. | 💸 Tính tiền |
+|                | Spark (trước)                               | Blaze (sau khi bật billing) |
+| -------------- | --------------------------------------------- | ---------------------------- |
+| Firestore free | 50k đọc + 20k ghi/ngày                     | **giống hệt**        |
+| Hosting free   | 10 GB + 360 MB/ngày                          | **giống hệt**        |
+| Vượt quota   | ⛔ App báo lỗi. Không thể có hoá đơn. | 💸 Tính tiền               |
 
 Con số miễn phí y nguyên; thứ mất đi là cái phanh. Lớp 2+3 là phanh thay thế.
 
@@ -1799,18 +1802,18 @@ DONE
 
 ## 4.8. Bảng chi phí dự kiến (kiến trúc all-in-one)
 
-| Dịch vụ | Free tier | Mức dùng thật | Ra tiền? |
-|---|---|---|---|
-| Cloud Run vCPU | 180.000 vCPU-giây | ~45.000 (min=0, request ngắn) | Không |
-| Cloud Run RAM | 360.000 GiB-giây | ~22.000 | Không |
-| Cloud Run request | 2.000.000 | vài nghìn | Không |
-| **Cloud Run egress** | **1 GiB (chỉ Bắc Mỹ)** | ~0,3 GB *(gzip + cache 1 năm)* | **~$0,04** ⚠️ |
-| Artifact Registry | 0,5 GB | ~240 MB *(3 image, có cleanup)* | Không |
-| Cloud Logging | 50 GiB | vài chục MB | Không |
-| Cloud Build | 2.500 phút | **0** — build ở máy | Không |
-| Secret Manager | 6 phiên bản | **0** — dùng env var | Không |
-| Firestore | 50k đọc + 20k ghi/ngày | có cache 30s | Không |
-| Gemini Dev API | quota theo phút/ngày | chốt 800/ngày trong code | Không |
+| Dịch vụ                  | Free tier                       | Mức dùng thật                  | Ra tiền?             |
+| -------------------------- | ------------------------------- | --------------------------------- | --------------------- |
+| Cloud Run vCPU             | 180.000 vCPU-giây              | ~45.000 (min=0, request ngắn)    | Không                |
+| Cloud Run RAM              | 360.000 GiB-giây               | ~22.000                           | Không                |
+| Cloud Run request          | 2.000.000                       | vài nghìn                       | Không                |
+| **Cloud Run egress** | **1 GiB (chỉ Bắc Mỹ)** | ~0,3 GB*(gzip + cache 1 năm)*  | **~$0,04** ⚠️ |
+| Artifact Registry          | 0,5 GB                          | ~240 MB*(3 image, có cleanup)* | Không                |
+| Cloud Logging              | 50 GiB                          | vài chục MB                     | Không                |
+| Cloud Build                | 2.500 phút                     | **0** — build ở máy      | Không                |
+| Secret Manager             | 6 phiên bản                   | **0** — dùng env var      | Không                |
+| Firestore                  | 50k đọc + 20k ghi/ngày       | có cache 30s                     | Không                |
+| Gemini Dev API             | quota theo phút/ngày          | chốt 800/ngày trong code        | Không                |
 
 **Tổng dự kiến: dưới $0,10 cho cả kỳ thi.** Với Free Trial billing account (§0.5) thì
 khoản đó ăn vào $300 credit và **hoá đơn thực tế là $0,00**.
@@ -1824,12 +1827,12 @@ Dòng egress là cái giá của chữ "only" trong thể lệ (§0.3). Nó đã
 
 ## 4.9. Bốn thứ tuyệt đối đừng làm
 
-| | Hành động | Mất bao nhiêu | Khi nào |
-|---|---|---|---|
-| 🔴 1 | Bật **Minimum instances > 0** hoặc **CPU always allocated** | **~$60/tháng** | Ngay, 24/7 |
-| 🔴 2 | Deploy > 7 lần khi chưa gắn cleanup policy | $0,10/GB/tháng, **tăng mãi** | Từ lần thứ 8 |
-| 🔴 3 | Tạo **Load Balancer** / custom domain cho Cloud Run | **$18-25/tháng** | Ngay từ giờ đầu |
-| 🔴 4 | Dùng `gcloud run deploy --source` | vài cent + 2 dịch vụ lạ trong hoá đơn | Mỗi lần deploy |
+|      | Hành động                                                             | Mất bao nhiêu                              | Khi nào            |
+| ---- | ------------------------------------------------------------------------ | -------------------------------------------- | ------------------- |
+| 🔴 1 | Bật**Minimum instances > 0** hoặc **CPU always allocated** | **~$60/tháng**                        | Ngay, 24/7          |
+| 🔴 2 | Deploy > 7 lần khi chưa gắn cleanup policy                            | $0,10/GB/tháng,**tăng mãi**         | Từ lần thứ 8     |
+| 🔴 3 | Tạo**Load Balancer** / custom domain cho Cloud Run                | **$18-25/tháng**                      | Ngay từ giờ đầu |
+| 🔴 4 | Dùng`gcloud run deploy --source`                                      | vài cent + 2 dịch vụ lạ trong hoá đơn | Mỗi lần deploy    |
 
 Số 3 là **dịch vụ duy nhất trong toàn bộ danh sách không có free tier** — tính tiền theo
 giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.app` đã đủ cho thể lệ.
@@ -1854,6 +1857,7 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 ## ⏰ Phase 0 — cổng chặn, không qua thì không làm gì khác
 
 **Build:**
+
 - [ ] `npm install compression` và `npm i -D @types/compression` đã chạy.
 - [ ] `Dockerfile`, `docker/package.runtime.json`, `.dockerignore`, `docker/artifact-cleanup-policy.json` đã tạo.
 - [ ] `server/index.ts` có `compression()`, cache header, và nhánh `servesStatic`.
@@ -1862,11 +1866,13 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 - [ ] `docker build .` thành công; image **< 250 MB**.
 
 **Ba chốt trong script deploy phải thật sự chặn được — thử từng cái:**
+
 - [ ] Thêm `dist` vào `.dockerignore`, build lại → phải thấy `✖ DỪNG: image thiếu dist/`.
 - [ ] Chốt khoá Gemini chạy và trả về sạch.
 - [ ] Chốt kích thước chạy và in ra số MB.
 
 **Link nộp bài — mỗi dòng là một cách mất 10 điểm:**
+
 - [ ] `curl -o /dev/null -w '%{http_code}' $URL` → **200**
 - [ ] Mở ở **cửa sổ ẩn danh** → trang chủ hiện, không đòi đăng nhập *(thể lệ: "accessible by the public")*
 - [ ] `curl $URL/api/status` → `{"gemini":true,...}`, không phải HTML
@@ -1874,6 +1880,7 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 - [ ] Bấm thật trong trình duyệt: mở tour → đổi ngôn ngữ → hỏi chatbot một câu
 
 **Cấu hình còn miễn phí:**
+
 - [ ] `minScale = 0`, `maxScale = 1`, `cpu-throttling = true`
 - [ ] Cleanup policy đã gắn **ngay lúc tạo repo**
 - [ ] **Không** tạo Load Balancer / custom domain cho Cloud Run
@@ -1881,6 +1888,7 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 - [ ] Đã hỏi chủ dự án về **Free Trial billing account** trước khi bật billing *(§0.5)*
 
 **Nộp bài — Codex nhắc, chủ dự án làm:**
+
 - [ ] `SUBMISSION.md` đã tạo, đã điền link thật
 - [ ] **Google AI Studio share link** ← thiếu là không được chấm
 - [ ] Video YouTube ≤ 2 phút, **công khai**
@@ -1891,12 +1899,14 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 ---
 
 ## Phase 3 — Chatbot đa ngôn ngữ *(ưu tiên 2)*
+
 - [ ] Chạy đủ 5 dòng bảng kiểm thử ở §3.6.
 - [ ] Câu hỏi tiếng Nhật **không** bị từ chối off-topic (cổng scope ở §3.4 đã sửa).
 - [ ] `DEPLOY.md` §A4 Template 1 đã ghi việc phải sửa prompt trên Firebase Console.
 - [ ] **Deploy lại Cloud Run** sau khi sửa — nếu không, giám khảo vẫn thấy bản cũ.
 
 ## Phase 2 — Video bỏ lọc ngôn ngữ *(ưu tiên 3)*
+
 - [ ] `grep -rn "videoMatchesLanguage\|contentLanguage" src/components/LocalVideoManager.tsx` rỗng.
 - [ ] Đổi site VI ↔ EN, danh sách video **không đổi**.
 - [ ] Form thêm video không còn ô chọn ngôn ngữ.
@@ -1918,6 +1928,7 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 - [ ] Deploy lại Cloud Run.
 
 ## Phase 4 — Chặn chi phí
+
 - [ ] Budget $1 tồn tại, nối vào topic `billing-alerts`, bật email alert.
 - [ ] Kill switch tồn tại **và** service account có `roles/billing.projectManager` ← hay quên nhất.
 - [ ] `npm run cloudrun:verify` chạy được và **thoát mã 0**.
@@ -1925,10 +1936,11 @@ giờ kể cả khi không ai truy cập. Bạn không cần nó: link `*.run.ap
 - [ ] `CLOUDRUN_ZERO_COST.md` §2.3 và §7 đã sửa cho khớp kiến trúc all-in-one *(§4.10)*.
 
 ## Toàn bộ
+
 - [ ] `npm run lint` sạch.
 - [ ] `npm run build` sạch.
 - [ ] `npm run test:rules`, `npm run test:videos`, `npm run test:hostchat` chạy được
-      (sửa assertion nếu Phase 1/2 làm hỏng).
+  (sửa assertion nếu Phase 1/2 làm hỏng).
 
 ---
 

@@ -22,7 +22,7 @@
  */
 
 import { getFirebase } from '../config/firebase';
-import type { Booking, HostKycApplication, LocalVideo, Tour, TourReview, User, UserRole } from '../types';
+import type { Booking, HostKycApplication, LocalVideo, SosAlert, Tour, TourReview, User, UserRole } from '../types';
 
 const COLLECTIONS = {
   profiles: 'profiles',
@@ -360,6 +360,80 @@ export const fetchBookings = (identity: CloudIdentity | null) =>
 export const saveBookings = (rows: Booking[], identity: CloudIdentity | null) =>
   upsertAll(COLLECTIONS.bookings, rows, identity);
 
+/**
+ * Keeps a signed-in host's incoming-booking list live. The constrained query
+ * is important: Firestore rules do not filter a broad collection read for us.
+ */
+export async function subscribeHostBookings(
+  hostId: string,
+  onRows: (rows: Booking[]) => void,
+  onError?: (error: Error) => void,
+): Promise<() => void> {
+  const fb = await getFirebase();
+  if (!fb?.auth.currentUser || fb.auth.currentUser.uid !== hostId) return () => undefined;
+
+  const { collection, onSnapshot, query, where } = await import('firebase/firestore');
+  return onSnapshot(
+    query(collection(fb.db, COLLECTIONS.bookings), where('hostId', '==', hostId)),
+    (snapshot) => {
+      const rows = snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as Booking));
+      onRows(rows);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+/** Atomically creates a booking and removes its single-slot tour from sale. */
+export async function reserveTourWithBooking(booking: Booking): Promise<void> {
+  const fb = await getFirebase();
+  if (!fb?.auth.currentUser || fb.auth.currentUser.uid !== booking.customerId) {
+    throw new Error('FIREBASE_SESSION_REQUIRED');
+  }
+
+  const { doc, runTransaction } = await import('firebase/firestore');
+  const tourRef = doc(fb.db, COLLECTIONS.tours, booking.tourId);
+  const bookingRef = doc(fb.db, COLLECTIONS.bookings, booking.id);
+  await runTransaction(fb.db, async (transaction) => {
+    const tour = await transaction.get(tourRef);
+    if (!tour.exists()) throw new Error('TOUR_NOT_FOUND');
+    if (tour.data().status !== 'active') throw new Error('TOUR_ALREADY_BOOKED');
+    transaction.set(bookingRef, stripUndefined(booking as unknown as Record<string, unknown>));
+    transaction.update(tourRef, { status: 'booked', reservedByBookingId: booking.id });
+  });
+
+  remember(COLLECTIONS.bookings, [booking]);
+  invalidate(COLLECTIONS.bookings);
+  invalidate(COLLECTIONS.tours);
+}
+
+/** Changes booking state, releasing its tour atomically when a pending customer cancels. */
+export async function transitionBookingStatus(
+  booking: Booking,
+  status: 'confirmed' | 'cancelled' | 'completed',
+): Promise<void> {
+  const fb = await getFirebase();
+  if (!fb?.auth.currentUser) throw new Error('FIREBASE_SESSION_REQUIRED');
+  const { deleteField, doc, runTransaction } = await import('firebase/firestore');
+  const bookingRef = doc(fb.db, COLLECTIONS.bookings, booking.id);
+  const tourRef = doc(fb.db, COLLECTIONS.tours, booking.tourId);
+  await runTransaction(fb.db, async (transaction) => {
+    // Every read happens before every write. Firestore rejects a transaction
+    // that reads after it has written, so fetching the tour inside the
+    // `cancelled` branch *below* the booking update threw client-side and the
+    // cancellation never reached the server.
+    const current = await transaction.get(bookingRef);
+    if (!current.exists()) throw new Error('BOOKING_NOT_FOUND');
+    const reserved = status === 'cancelled' ? await transaction.get(tourRef) : null;
+
+    transaction.update(bookingRef, { status });
+    if (reserved?.exists() && reserved.data().reservedByBookingId === booking.id) {
+      transaction.update(tourRef, { status: 'active', reservedByBookingId: deleteField() });
+    }
+  });
+  invalidate(COLLECTIONS.bookings);
+  invalidate(COLLECTIONS.tours);
+}
+
 // The Explore page shows these to anyone, signed in or not, so the read is
 // public; the rules make the write admin-only.
 export const fetchLocalVideos = () => fetchPublic<LocalVideo>(COLLECTIONS.videos);
@@ -385,6 +459,85 @@ export const fetchKyc = (identity: CloudIdentity | null) =>
   fetchOwned<HostKycApplication>(COLLECTIONS.kyc, identity, ['hostId']);
 export const saveKyc = (rows: HostKycApplication[], identity: CloudIdentity | null) =>
   upsertAll(COLLECTIONS.kyc, rows, identity);
+
+/* ------------------------------------------------------------------ */
+/* SOS alerts                                                          */
+/* ------------------------------------------------------------------ */
+
+const SOS_ALERTS = 'sosAlerts';
+
+/**
+ * Sends one real alert to Firestore. This never contacts police or any other
+ * third party: the collection is readable only by ViS-Go administrators.
+ */
+export async function createSosAlert(
+  booking: Booking,
+  reporter: User,
+  coords: { latitude: number; longitude: number; accuracyMeters: number | null },
+): Promise<SosAlert> {
+  const fb = await getFirebase();
+  if (!fb) throw new Error('Firebase is not configured');
+  if (reporter.id !== booking.customerId && reporter.id !== booking.hostId) {
+    throw new Error('Only a participant in this booking may send an SOS alert');
+  }
+
+  const { addDoc, collection, serverTimestamp } = await import('firebase/firestore');
+  const reporterRole: SosAlert['reporterRole'] = reporter.id === booking.hostId ? 'host' : 'customer';
+  const payload = {
+    bookingId: booking.id,
+    reporterId: reporter.id,
+    reporterName: reporter.name,
+    reporterRole,
+    customerId: booking.customerId,
+    hostId: booking.hostId,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    accuracyMeters: coords.accuracyMeters,
+    createdAt: serverTimestamp(),
+    status: 'active' as const,
+  };
+  const ref = await addDoc(collection(fb.db, SOS_ALERTS), payload);
+  return { ...payload, id: ref.id, createdAt: new Date().toISOString() };
+}
+
+/** Live admin-only queue. The Firestore rules reject this query for non-admins. */
+export async function subscribeSosAlerts(
+  onChange: (alerts: SosAlert[]) => void,
+  onError?: (error: Error) => void,
+): Promise<() => void> {
+  const fb = await getFirebase();
+  if (!fb) {
+    onChange([]);
+    return () => undefined;
+  }
+
+  const { collection, onSnapshot, orderBy, query } = await import('firebase/firestore');
+  return onSnapshot(
+    query(collection(fb.db, SOS_ALERTS), orderBy('createdAt', 'desc')),
+    (snap) => {
+      onChange(
+        snap.docs.map((row) => {
+          const data = row.data() as Omit<SosAlert, 'id' | 'createdAt'> & {
+            createdAt?: { toDate?: () => Date };
+          };
+          return {
+            ...data,
+            id: row.id,
+            createdAt: data.createdAt?.toDate?.().toISOString() ?? new Date().toISOString(),
+          };
+        }),
+      );
+    },
+    (error) => onError?.(error),
+  );
+}
+
+export async function updateSosStatus(id: string, status: 'resolved'): Promise<void> {
+  const fb = await getFirebase();
+  if (!fb) throw new Error('Firebase is not configured');
+  const { doc, updateDoc } = await import('firebase/firestore');
+  await updateDoc(doc(fb.db, SOS_ALERTS, id), { status });
+}
 
 /* ------------------------------------------------------------------ */
 /* Seeding                                                             */

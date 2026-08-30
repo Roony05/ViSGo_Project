@@ -11,6 +11,8 @@ import { HostCreatorStudio } from './components/HostCreatorStudio';
 import { HostDashboard } from './components/HostDashboard';
 import { AdminHub } from './components/AdminHub';
 import { MyBookingsView } from './components/MyBookingsView';
+import { HostLeaderboardView } from './components/HostLeaderboardView';
+import { ChatInboxModal, type InboxThread } from './components/ChatInboxModal';
 import { ReviewModal } from './components/ReviewModal';
 import { AuthModal } from './components/AuthModal';
 import { AIAssistantPage } from './components/AIAssistantPage';
@@ -32,7 +34,10 @@ import { signOutGoogle } from './utils/googleAuth';
 import { HAS_FIREBASE } from './config/firebase';
 import { restoreFirebaseSession, signOutFirebase } from './utils/firebaseAuth';
 import { cloudEnabled, hydrateFromCloud, hydrateOwned, setCloudIdentity, setSyncListener, type SyncState } from './utils/cloudSync';
-import { deleteLocalVideo, writeProfile } from './utils/firestoreDb';
+import { deleteLocalVideo, reserveTourWithBooking, subscribeHostBookings, transitionBookingStatus, writeProfile } from './utils/firestoreDb';
+import { deliverBookingEvent } from './utils/bookingDelivery';
+import { subscribeUserConversations } from './utils/chatDb';
+import type { Conversation } from './types';
 
 /**
  * Every address the app answers to.
@@ -46,6 +51,7 @@ const ROUTES = [
   'vr-heritage',
   'ai-assistant',
   'my-bookings',
+  'host-ranking',
   'host-studio',
   'admin-hub',
 ] as const;
@@ -169,6 +175,7 @@ export default function App() {
   const [radarModalOpen, setRadarModalOpen] = useState<boolean>(false);
   const [radarBooking, setRadarBooking] = useState<Booking | null>(null);
   const [chatDrawerOpen, setChatDrawerOpen] = useState<boolean>(false);
+  const [chatStartsWithCall, setChatStartsWithCall] = useState<boolean>(false);
   /**
    * The trip the chat drawer was opened *for*, when something named one.
    *
@@ -180,12 +187,25 @@ export default function App() {
    */
   const [chatSubject, setChatSubject] = useState<Booking | null>(null);
 
-  const openChatFor = (booking: Booking) => {
+  const openChatFor = (booking: Booking, startWithCall = false) => {
     setChatSubject(booking);
+    setChatStartsWithCall(startWithCall);
+    setInboxOpen(false);
     setChatDrawerOpen(true);
   };
+
+  /**
+   * The thread picker behind the generic "Messages" button.
+   *
+   * A host cannot reach a pre-booking enquiry through their booking list —
+   * there is no booking yet — so the button opens the list of conversations
+   * this account actually belongs to instead of guessing one.
+   */
+  const [inboxOpen, setInboxOpen] = useState<boolean>(false);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const [reviewModalOpen, setReviewModalOpen] = useState<boolean>(false);
   const [reviewingTour, setReviewingTour] = useState<Tour | null>(null);
+  const [reviewingBooking, setReviewingBooking] = useState<Booking | null>(null);
 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -339,10 +359,40 @@ export default function App() {
     );
   };
 
-  const handleConfirmBooking = (newBooking: Booking) => {
+  const handleConfirmBooking = async (newBooking: Booking): Promise<boolean> => {
     const updated = [newBooking, ...bookings];
+    const reservedTours = tours.map((tour) =>
+      tour.id === newBooking.tourId
+        ? { ...tour, status: 'booked' as const, reservedByBookingId: newBooking.id }
+        : tour,
+    );
+
+    if (cloudEnabled()) {
+      try {
+        await reserveTourWithBooking(newBooking);
+        // The transaction already wrote Firestore. Update only the synchronous
+        // render cache; mirroring again as the customer would be both wasteful
+        // and refused once the tour is no longer active.
+        Storage.hydrateLocal('bookings', updated);
+        Storage.hydrateLocal('tours', reservedTours);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        addToast(
+          'error',
+          language === 'vi' ? 'Không thể giữ chỗ' : 'Could not reserve this tour',
+          reason === 'TOUR_ALREADY_BOOKED'
+            ? language === 'vi' ? 'Một khách khác vừa đặt tour này trước bạn.' : 'Another traveller just reserved this tour.'
+            : language === 'vi' ? 'Booking chưa được lưu. Kiểm tra mạng rồi thử lại.' : 'The booking was not saved. Check your connection and retry.',
+        );
+        return false;
+      }
+    } else {
+      Storage.saveBookings(updated);
+      Storage.saveTours(reservedTours);
+    }
+
     setBookings(updated);
-    Storage.saveBookings(updated);
+    setTours(reservedTours);
     addToast(
       'success',
       language === 'vi' ? 'Đã gửi yêu cầu đặt chỗ' : 'Booking request sent',
@@ -350,6 +400,7 @@ export default function App() {
         ? `Mã #${newBooking.id}. Host sẽ xác nhận lại — chưa thanh toán gì cả.`
         : `Reference #${newBooking.id}. Your host will confirm — nothing has been charged.`,
     );
+    return true;
   };
 
   // Host Tour Publish
@@ -401,14 +452,83 @@ export default function App() {
   };
 
   // Update Booking Status (Host accept / decline)
-  const handleUpdateBookingStatus = (bookingId: string, newStatus: 'confirmed' | 'cancelled') => {
-    const updated = bookings.map((b) => (b.id === bookingId ? { ...b, status: newStatus } : b));
+  const handleUpdateBookingStatus = async (
+    bookingId: string,
+    newStatus: 'confirmed' | 'cancelled' | 'completed',
+  ): Promise<void> => {
+    const subject = bookings.find((booking) => booking.id === bookingId);
+    if (!subject || !activeUser) return;
+    const isHost = activeUser.id === subject.hostId;
+    const isCustomer = activeUser.id === subject.customerId;
+    const allowed =
+      (isHost && subject.status === 'pending' && newStatus === 'confirmed')
+      || (isCustomer && subject.status === 'confirmed' && newStatus === 'completed')
+      || (isCustomer && subject.status === 'pending' && newStatus === 'cancelled');
+    if (!allowed) {
+      addToast(
+        'warning',
+        language === 'vi' ? 'Thao tác không được phép' : 'Action not allowed',
+        language === 'vi'
+          ? 'Host xác nhận yêu cầu; khách chỉ được hủy khi đang chờ và là người xác nhận hoàn thành.'
+          : 'The host confirms; the customer may cancel only while pending and confirms completion.',
+      );
+      return;
+    }
+    try {
+      if (cloudEnabled()) await transitionBookingStatus(subject, newStatus);
+    } catch (error) {
+      addToast('error', language === 'vi' ? 'Chưa cập nhật được' : 'Update failed', error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const changed = { ...subject, status: newStatus };
+    const updated = bookings.map((b) => (b.id === bookingId ? changed : b));
     setBookings(updated);
-    Storage.saveBookings(updated);
+    if (cloudEnabled()) Storage.hydrateLocal('bookings', updated);
+    else Storage.saveBookings(updated);
+
+    // A declined/cancelled request releases the slot immediately. Completing
+    // the trip does not: the host may need to edit price, schedule or content
+    // first, then explicitly reopen it from their dashboard.
+    if (newStatus === 'cancelled') {
+      const reopened = tours.map((tour) =>
+        tour.id === subject.tourId ? { ...tour, status: 'active' as const, reservedByBookingId: undefined } : tour,
+      );
+      setTours(reopened);
+      if (cloudEnabled()) Storage.hydrateLocal('tours', reopened);
+      else Storage.saveTours(reopened);
+    }
     addToast(
       'info',
       language === 'vi' ? 'Cập nhật đơn đặt' : 'Booking Updated',
       `Booking #${bookingId} is now ${newStatus.toUpperCase()}`
+    );
+    const tour = tours.find((item) => item.id === subject.tourId);
+    if (newStatus === 'confirmed' || newStatus === 'cancelled') {
+      void deliverBookingEvent(changed, language, tour?.durationHours ?? 3, newStatus).then((result) => {
+        if (result.status !== 'sent') {
+          addToast('warning', language === 'vi' ? 'Trạng thái đã lưu, email chưa gửi' : 'Status saved, email not sent', result.reason);
+        }
+      });
+    }
+    if (newStatus === 'completed' && tour) {
+      setReviewingTour(tour);
+      setReviewingBooking(changed);
+      setReviewModalOpen(true);
+    }
+  };
+
+  const handleReopenTour = (tourId: string) => {
+    const next = tours.map((tour) =>
+      tour.id === tourId ? { ...tour, status: 'active' as const } : tour,
+    );
+    setTours(next);
+    Storage.saveTours(next);
+    addToast(
+      'success',
+      language === 'vi' ? 'Đã mở lại tour' : 'Tour reopened',
+      language === 'vi'
+        ? 'Tour đã xuất hiện lại để khách mới đặt chỗ.'
+        : 'The tour is visible to travellers again.',
     );
   };
 
@@ -459,9 +579,24 @@ export default function App() {
 
   // Admin KYC Actions
   const handleApproveKyc = (appId: string) => {
+    const application = kycApps.find((item) => item.id === appId);
     const updated = kycApps.map((k) => (k.id === appId ? { ...k, status: 'approved' as const } : k));
     setKycApps(updated);
     Storage.saveKycApplications(updated);
+    if (application) {
+      const host = users.find((user) => user.id === application.hostId);
+      if (host) {
+        const verifiedHost = { ...host, verified: true };
+        const updatedUsers = users.map((user) => user.id === host.id ? verifiedHost : user);
+        setUsers(updatedUsers);
+        Storage.saveUsers(updatedUsers);
+        if (cloudEnabled()) {
+          void writeProfile(verifiedHost).catch((error: unknown) => {
+            console.warn('[ViS-Go] Approved host profile did not save:', error);
+          });
+        }
+      }
+    }
     addToast(
       'success',
       'Host Verified',
@@ -524,40 +659,82 @@ export default function App() {
       return;
     }
 
+    const completed = bookings.find((booking) =>
+      booking.tourId === tour.id
+      && booking.customerId === activeUser.id
+      && booking.status === 'completed'
+      && !reviews.some((review) => review.bookingId === booking.id),
+    );
+    if (!completed) {
+      addToast(
+        'info',
+        language === 'vi' ? 'Chưa thể đánh giá' : 'Review not available',
+        language === 'vi' ? 'Bạn chỉ đánh giá sau khi xác nhận hoàn thành chuyến đi, mỗi booking một lần.' : 'Complete the trip first; each booking can be reviewed once.',
+      );
+      return;
+    }
+
     setReviewingTour(tour);
+    setReviewingBooking(completed);
     setReviewModalOpen(true);
   };
 
-  /**
-   * Opens the thread with a specific host, from that host's tour page.
-   *
-   * A conversation *is* a booking — the document id is the booking id, which is
-   * what lets the rules decide membership without a join. So there is no thread
-   * to open before a trip exists, and the button that used to sit here called
-   * `onOpenChat()` with no argument: the drawer then fell back to whichever
-   * booking the user happened to have, which is usually a different host
-   * entirely. Pressing "message this host" opened a chat with someone else.
-   */
-  const handleMessageHost = (tour: Tour) => {
+  /** Opens a tour-specific contact thread before a reservation exists. */
+  const handleMessageHost = (tour: Tour, date: string, time: string, startWithCall = false) => {
     if (!activeUser) {
       setAuthDefaultTab('login');
       setAuthModalOpen(true);
       return;
     }
-    const withThisHost = bookings.find(
-      (b) => b.hostId === tour.hostId && (b.customerId === activeUser.id || b.hostId === activeUser.id),
-    );
-    if (!withThisHost) {
+    if (activeUser.role !== 'customer' || activeUser.id === tour.hostId) {
       addToast(
         'info',
-        language === 'vi' ? 'Nhắn tin mở sau khi đặt chỗ' : 'Chat opens once you book',
+        language === 'vi' ? 'Dành cho khách du lịch' : 'For travellers',
         language === 'vi'
-          ? 'Mỗi cuộc trò chuyện gắn với một chuyến đi cụ thể, nên hộp chat mở ngay sau khi bạn đặt tour này.'
-          : 'Each thread belongs to one trip, so the chat opens as soon as you book this tour.',
+          ? 'Khách có thể liên hệ host để thống nhất lịch trước khi đặt chỗ.'
+          : 'Travellers can contact the host to agree on a schedule before reserving.',
       );
       return;
     }
-    openChatFor(withThisHost);
+
+    const existingBooking = bookings.find(
+      (booking) => booking.tourId === tour.id
+        && booking.customerId === activeUser.id
+        && booking.status !== 'cancelled',
+    );
+    if (existingBooking) {
+      openChatFor(existingBooking, startWithCall);
+      return;
+    }
+
+    const start = new Date(`${date}T${time}:00+07:00`).getTime();
+    const contact: Booking = {
+      id: `contact_${tour.id}_${activeUser.id}`,
+      tourId: tour.id,
+      tourTitle: tour.title,
+      tourTitleVi: tour.titleVi,
+      tourImage: tour.coverImage,
+      city: tour.city,
+      hostId: tour.hostId,
+      hostName: tour.hostName,
+      hostPhone: tour.hostPhone,
+      hostAvatar: tour.hostAvatar,
+      customerId: activeUser.id,
+      customerName: activeUser.name,
+      customerEmail: activeUser.email,
+      customerPhone: activeUser.phone,
+      bookingDate: date,
+      bookingTime: time,
+      tourEndsAtEpochMs: start + tour.durationHours * 60 * 60 * 1000,
+      guestsCount: 1,
+      totalPriceVND: 0,
+      totalPriceUSD: 0,
+      platformFeeVND: 0,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      meetingPoint: language === 'vi' ? tour.meetingPointVi : tour.meetingPoint,
+    };
+    openChatFor(contact, startWithCall);
   };
 
   // Host Profile Customization Handler
@@ -784,6 +961,91 @@ export default function App() {
   }, [activeUser]);
 
   /**
+   * A host should not have to refresh the dashboard to discover a booking.
+   * The first snapshot hydrates silently; later new rows raise an in-app
+   * notification while retaining any bookings where this host is a traveller.
+   */
+  useEffect(() => {
+    if (!cloudEnabled() || !activeUser || activeUser.role !== 'host') return;
+
+    let cancelled = false;
+    let initialized = false;
+    let knownIds = new Set<string>();
+    let unsubscribe = () => undefined;
+
+    void subscribeHostBookings(
+      activeUser.id,
+      (hostRows) => {
+        if (cancelled) return;
+        const nextIds = new Set(hostRows.map((booking) => booking.id));
+        if (initialized) {
+          const newest = hostRows.find((booking) => !knownIds.has(booking.id));
+          if (newest) {
+            addToast(
+              'info',
+              language === 'vi' ? 'Có booking mới' : 'New booking',
+              language === 'vi'
+                ? `${newest.customerName} vừa đặt “${newest.tourTitleVi || newest.tourTitle}”.`
+                : `${newest.customerName} just booked “${newest.tourTitle}”.`,
+            );
+          }
+        }
+        initialized = true;
+        knownIds = nextIds;
+        setBookings((current) => {
+          const merged = [...hostRows, ...current.filter((booking) => booking.hostId !== activeUser.id)];
+          Storage.hydrateLocal('bookings', merged);
+          return merged;
+        });
+      },
+      () => {
+        // Email remains the out-of-app notification if the live listener drops.
+      },
+    ).then((stop) => {
+      if (cancelled) stop();
+      else unsubscribe = stop;
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [activeUser, language]);
+
+  /**
+   * Every thread this account belongs to, for the inbox.
+   *
+   * Read from `conversations` rather than from bookings, because an enquiry
+   * written before a reservation has no booking row on either side.
+   */
+  useEffect(() => {
+    if (!cloudEnabled() || !activeUser) {
+      setConversations([]);
+      return;
+    }
+
+    let cancelled = false;
+    let unsubscribe = () => undefined;
+    void subscribeUserConversations(
+      activeUser.id,
+      (rows) => {
+        if (!cancelled) setConversations(rows);
+      },
+      () => {
+        if (!cancelled) setConversations([]);
+      },
+    ).then((stop) => {
+      if (cancelled) stop();
+      else unsubscribe = stop;
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [activeUser]);
+
+  /**
    * URL <-> tab, both directions.
    *
    * Two effects rather than one because they answer to different events: the
@@ -907,6 +1169,83 @@ export default function App() {
     return mine.find((b) => b.status === 'confirmed') ?? mine[0] ?? null;
   }, [bookings, activeUser]);
 
+  /**
+   * The inbox rows: one per conversation, plus every trip that has no thread
+   * open yet so a first message is always one tap away.
+   *
+   * A conversation with no matching booking is an enquiry. Its subject is
+   * rebuilt from the fields the thread itself carries — that is why they are
+   * denormalised onto the document — falling back to the tour when an older
+   * thread predates them.
+   */
+  const inboxThreads = React.useMemo<InboxThread[]>(() => {
+    if (!activeUser) return [];
+
+    const mine = bookings.filter(
+      (b) => b.customerId === activeUser.id || b.hostId === activeUser.id,
+    );
+    const byId = new Map<string, InboxThread>();
+
+    for (const booking of mine) {
+      byId.set(booking.id, { subject: booking, unread: false, isEnquiry: false });
+    }
+
+    for (const conversation of conversations) {
+      const existing = byId.get(conversation.id);
+      const lastAt = conversation.lastMessageAt?.getTime() ?? 0;
+      const readAt = conversation.lastReadAt?.[activeUser.id]?.getTime() ?? 0;
+      const unread =
+        Boolean(conversation.lastMessage)
+        && conversation.lastSenderId !== activeUser.id
+        && lastAt > readAt;
+
+      if (existing) {
+        byId.set(conversation.id, { ...existing, conversation, unread });
+        continue;
+      }
+
+      const tour = tours.find((item) => item.id === conversation.tourId);
+      const hostId = conversation.hostId ?? tour?.hostId ?? '';
+      const customerId = conversation.customerId
+        ?? conversation.participants.find((uid) => uid !== hostId)
+        ?? '';
+      const subject: Booking = {
+        id: conversation.id,
+        tourId: conversation.tourId ?? '',
+        tourTitle: conversation.tourTitle || tour?.title || '',
+        tourTitleVi: tour?.titleVi ?? conversation.tourTitle ?? '',
+        tourImage: tour?.coverImage ?? '',
+        city: conversation.city || tour?.city || '',
+        hostId,
+        hostName: conversation.hostName ?? tour?.hostName ?? '',
+        hostPhone: conversation.hostPhone ?? tour?.hostPhone ?? '',
+        hostAvatar: conversation.hostAvatar ?? tour?.hostAvatar ?? '',
+        customerId,
+        customerName:
+          conversation.customerName
+          ?? (customerId === activeUser.id ? activeUser.name : language === 'vi' ? 'Khách' : 'Traveller'),
+        customerEmail: customerId === activeUser.id ? activeUser.email : '',
+        customerPhone: customerId === activeUser.id ? activeUser.phone : '',
+        bookingDate: conversation.bookingDate ?? '',
+        bookingTime: conversation.bookingTime ?? '',
+        guestsCount: 1,
+        totalPriceVND: 0,
+        totalPriceUSD: 0,
+        platformFeeVND: 0,
+        status: 'pending',
+        createdAt: conversation.lastMessageAt?.toISOString() ?? new Date().toISOString(),
+        meetingPoint: tour ? (language === 'vi' ? tour.meetingPointVi : tour.meetingPoint) : '',
+      };
+      byId.set(conversation.id, { subject, conversation, unread, isEnquiry: true });
+    }
+
+    const at = (thread: InboxThread) =>
+      thread.conversation?.lastMessageAt?.getTime()
+      ?? new Date(thread.subject.createdAt).getTime()
+      ?? 0;
+    return [...byId.values()].sort((a, b) => at(b) - at(a));
+  }, [activeUser, bookings, conversations, tours, language]);
+
   const handleSubmitReview = (newReview: TourReview) => {
     const updatedReviews = [newReview, ...reviews];
     setReviews(updatedReviews);
@@ -971,7 +1310,7 @@ export default function App() {
           setAuthModalOpen(true);
         }}
         onLogout={handleLogout}
-        onOpenChat={() => setChatDrawerOpen(true)}
+        onOpenChat={() => setInboxOpen(true)}
         onOpenRadar={() => {
           setRadarBooking(bookings[0] || null);
           setRadarModalOpen(true);
@@ -996,7 +1335,7 @@ export default function App() {
           setRadarBooking(bookings[0] || null);
           setRadarModalOpen(true);
         }}
-        onOpenChat={() => setChatDrawerOpen(true)}
+        onOpenChat={() => setInboxOpen(true)}
         onOpenAIChat={() => setActiveTab('ai-assistant')}
         onOpenSettings={() => setSettingsModalOpen(true)}
         onOpenProfile={() => setProfileModalOpen(true)}
@@ -1062,8 +1401,20 @@ export default function App() {
               setRadarModalOpen(true);
             }}
             onOpenChat={openChatFor}
+            reviews={reviews}
             onOpenReview={(t) => handleOpenWriteReview(t)}
+            onCompleteBooking={(bookingId) => void handleUpdateBookingStatus(bookingId, 'completed')}
             onExploreMore={() => setActiveTab('explore')}
+            onCancelBooking={(bookingId) => handleUpdateBookingStatus(bookingId, 'cancelled')}
+          />
+        )}
+
+        {activeTab === 'host-ranking' && activeUser?.role === 'customer' && (
+          <HostLeaderboardView
+            tours={ratedTours}
+            reviews={reviews}
+            language={language}
+            onSelectTour={openTour}
           />
         )}
 
@@ -1081,6 +1432,7 @@ export default function App() {
               language={language}
               currency={currency}
               onUpdateBookingStatus={handleUpdateBookingStatus}
+              onReopenTour={handleReopenTour}
               onOpenLiveRadar={(b) => {
                 setRadarBooking(b);
                 setRadarModalOpen(true);
@@ -1130,7 +1482,8 @@ export default function App() {
               onBack={leaveTourPage}
               onProceedBooking={handleProceedBooking}
               onOpenWriteReview={handleOpenWriteReview}
-              onOpenChat={() => handleMessageHost(selectedTour)}
+              onOpenChat={(date, time) => handleMessageHost(selectedTour, date, time)}
+              onOpenCall={(date, time) => handleMessageHost(selectedTour, date, time, true)}
             />
           ) : cloudLoading ? (
             /* The catalogue has not arrived yet. A link opened cold lands here
@@ -1222,9 +1575,20 @@ export default function App() {
           activeUser={activeUser}
           language={language}
           onClose={() => setRadarModalOpen(false)}
-          onOpenChat={() => setChatDrawerOpen(true)}
+          onOpenChat={() => (radarBooking ? openChatFor(radarBooking) : setInboxOpen(true))}
         />
       )}
+
+      {/* Thread picker. Opened by the generic "Messages" button in the header
+          and the sidebar, which used to guess a booking instead. */}
+      <ChatInboxModal
+        isOpen={inboxOpen}
+        threads={inboxThreads}
+        activeUser={activeUser}
+        language={language}
+        onSelect={(subject) => openChatFor(subject)}
+        onClose={() => setInboxOpen(false)}
+      />
 
       {/* Direct In-App Chat Drawer */}
       {chatDrawerOpen && (
@@ -1233,9 +1597,11 @@ export default function App() {
           activeUser={activeUser}
           booking={chatSubject ?? chatBooking}
           language={language}
+          startWithCall={chatStartsWithCall}
           onClose={() => {
             setChatDrawerOpen(false);
             setChatSubject(null);
+            setChatStartsWithCall(false);
           }}
         />
       )}
@@ -1245,11 +1611,13 @@ export default function App() {
         <ReviewModal
           isOpen={reviewModalOpen}
           tour={reviewingTour}
+          booking={reviewingBooking}
           activeUser={activeUser}
           language={language}
           onClose={() => {
             setReviewModalOpen(false);
             setReviewingTour(null);
+            setReviewingBooking(null);
           }}
           onSubmitReview={handleSubmitReview}
         />

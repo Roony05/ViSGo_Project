@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Booking, HostKycApplication, LocalVideo, Tour, User, Language, UserRole } from '../types';
+import { Booking, HostKycApplication, LocalVideo, SosAlert, Tour, User, Language, UserRole } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
 import { formatCccd } from '../utils/cccd';
 import { Avatar } from './Avatar';
 import { LocalVideoManager } from './LocalVideoManager';
 import { AdminDashboard } from './AdminDashboard';
+import { subscribeSosAlerts, updateSosStatus } from '../utils/firestoreDb';
+import { buildGoogleMapsCoordUrl } from '../utils/googleMaps';
 
 interface AdminHubProps {
   kycApplications: HostKycApplication[];
@@ -83,6 +85,33 @@ export const AdminHub: React.FC<AdminHubProps> = ({
      what they came to find out. */
   const [activeTab, setActiveTab] = useState<'dashboard' | 'kyc' | 'tours' | 'videos' | 'safety' | 'team'>('dashboard');
   const [memberQuery, setMemberQuery] = useState('');
+  const [sosAlerts, setSosAlerts] = useState<SosAlert[]>([]);
+  const [sosLoadError, setSosLoadError] = useState('');
+
+  useEffect(() => {
+    let unsubscribe = () => undefined;
+    let disposed = false;
+    void subscribeSosAlerts(
+      (alerts) => {
+        if (!disposed) {
+          setSosAlerts(alerts);
+          setSosLoadError('');
+        }
+      },
+      () => {
+        if (!disposed) setSosLoadError(language === 'vi' ? 'Không tải được hàng đợi SOS.' : 'Could not load SOS queue.');
+      },
+    ).then((stop) => {
+      if (disposed) stop();
+      else unsubscribe = stop;
+    });
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, [language]);
+
+  const activeSosAlerts = useMemo(() => sosAlerts.filter((alert) => alert.status === 'active'), [sosAlerts]);
 
   const admins = useMemo(() => users.filter((u) => u.role === 'admin'), [users]);
 
@@ -293,7 +322,7 @@ export const AdminHub: React.FC<AdminHubProps> = ({
           }`}
         >
           <i className="fa-solid fa-tower-broadcast mr-1.5"></i>
-          {language === 'vi' ? 'Chuyến đi trực tiếp' : 'Active Live Trips'} ({liveBookingsCount})
+          {language === 'vi' ? 'An toàn & SOS' : 'Safety & SOS'} ({activeSosAlerts.length})
         </button>
 
         <button
@@ -512,11 +541,77 @@ export const AdminHub: React.FC<AdminHubProps> = ({
       {/* TAB 3: SAFETY DISPATCH & ACTIVE TRIPS */}
       {activeTab === 'safety' && (
         <div className="bg-white rounded-3xl border border-stone-200 p-6 shadow-xs space-y-4">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-serif font-bold text-base text-red-800">
+                {language === 'vi' ? 'Cảnh báo SOS tới admin' : 'Admin SOS alerts'}
+              </h3>
+              <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-800 text-[10px] font-black">
+                {activeSosAlerts.length} {language === 'vi' ? 'ĐANG MỞ' : 'OPEN'}
+              </span>
+            </div>
+            <p className="text-xs text-stone-500">
+              {language === 'vi'
+                ? 'Đây là cảnh báo nội bộ ViS-Go. Hệ thống không tự động liên hệ công an hoặc dịch vụ khẩn cấp.'
+                : 'This is an internal ViS-Go queue. The system does not automatically contact police or emergency services.'}
+            </p>
+
+            {sosLoadError && <div className="p-3 rounded-xl bg-red-50 text-red-800 text-xs border border-red-200">{sosLoadError}</div>}
+
+            {activeSosAlerts.length === 0 ? (
+              <div className="p-4 rounded-2xl bg-stone-50 border border-stone-200 text-xs text-stone-500 text-center">
+                {language === 'vi' ? 'Không có cảnh báo SOS đang mở.' : 'No open SOS alerts.'}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {activeSosAlerts.map((alert) => (
+                  <div key={alert.id} className="p-4 rounded-2xl bg-red-50 border-2 border-red-300 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-black text-red-900">
+                        SOS • {alert.reporterName} • #{alert.bookingId}
+                      </p>
+                      <time className="text-[10px] text-red-700">{new Date(alert.createdAt).toLocaleString(language === 'vi' ? 'vi-VN' : 'en-US')}</time>
+                    </div>
+                    <p className="text-[11px] text-stone-700 font-mono">
+                      {alert.latitude.toFixed(6)}, {alert.longitude.toFixed(6)}
+                      {alert.accuracyMeters !== null ? ` • ±${alert.accuracyMeters}m` : ''}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <a
+                        href={buildGoogleMapsCoordUrl(alert.latitude, alert.longitude)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 px-3 py-2 rounded-xl bg-white border border-red-300 text-red-800 text-[11px] font-bold text-center"
+                      >
+                        <i className="fa-solid fa-map-location-dot mr-1.5"></i>
+                        {language === 'vi' ? 'Mở tọa độ' : 'Open coordinates'}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await updateSosStatus(alert.id, 'resolved');
+                          sounds.playSuccessChime();
+                        }}
+                        className="flex-1 px-3 py-2 rounded-xl bg-red-700 hover:bg-red-800 text-white text-[11px] font-bold cursor-pointer"
+                      >
+                        <i className="fa-solid fa-check mr-1.5"></i>
+                        {language === 'vi' ? 'Đánh dấu đã xử lý' : 'Mark resolved'}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-stone-200 pt-4 space-y-4">
           <h3 className="font-serif font-bold text-base text-stone-900">
             {language === 'vi' ? 'Chuyến đi đang diễn ra' : 'Active live trips'}
           </h3>
           <p className="text-xs text-stone-500">
-            Real-time telemetry tracking active host & customer pairings across Vietnam.
+            {language === 'vi'
+              ? 'Danh sách booking đã xác nhận. ViS-Go không thu hoặc hiển thị vị trí liên tục tại đây.'
+              : 'Confirmed bookings. ViS-Go does not collect or display continuous location telemetry here.'}
           </p>
 
           {liveTrips.length === 0 ? (
@@ -537,7 +632,7 @@ export const AdminHub: React.FC<AdminHubProps> = ({
                       Trip #{trip.id} ({trip.city})
                     </span>
                     <span className="px-2 py-0.5 bg-emerald-200 text-emerald-900 rounded text-[10px] font-bold shrink-0">
-                      ACTIVE GPS TRACKING
+                      {language === 'vi' ? 'ĐÃ XÁC NHẬN' : 'CONFIRMED'}
                     </span>
                   </div>
                   <p className="text-xs text-stone-700">
@@ -560,6 +655,7 @@ export const AdminHub: React.FC<AdminHubProps> = ({
               ))}
             </div>
           )}
+          </div>
         </div>
       )}
 

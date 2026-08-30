@@ -33,7 +33,9 @@ interface HostDashboardProps {
   tours: Tour[];
   language: Language;
   currency: 'VND' | 'USD';
-  onUpdateBookingStatus: (bookingId: string, newStatus: 'confirmed' | 'cancelled') => void;
+  onUpdateBookingStatus: (bookingId: string, newStatus: 'confirmed' | 'cancelled' | 'completed') => void;
+  /** Publishes a reserved listing again after the host has finished/edit it. */
+  onReopenTour: (tourId: string) => void;
   onOpenLiveRadar: (booking: Booking) => void;
   /** Opens the conversation for this specific trip, not a generic inbox. */
   onOpenChat: (booking: Booking) => void;
@@ -58,6 +60,7 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
   language,
   currency,
   onUpdateBookingStatus,
+  onReopenTour,
   onOpenLiveRadar,
   onOpenChat,
   onSwitchToStudio,
@@ -101,11 +104,6 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
   const handleAccept = (bookingId: string) => {
     onUpdateBookingStatus(bookingId, 'confirmed');
     sounds.playSuccessChime();
-  };
-
-  const handleDecline = (bookingId: string) => {
-    onUpdateBookingStatus(bookingId, 'cancelled');
-    sounds.playNotificationPing();
   };
 
   return (
@@ -329,7 +327,12 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
               </div>
 
               <div className="space-y-2">
-                {myTours.map((tour) => (
+                {myTours.map((tour) => {
+                  const reservedBooking = tour.reservedByBookingId
+                    ? hostBookings.find((booking) => booking.id === tour.reservedByBookingId)
+                    : hostBookings.find((booking) => booking.tourId === tour.id && booking.status !== 'cancelled');
+                  const canReopen = reservedBooking?.status === 'completed' || reservedBooking?.status === 'cancelled';
+                  return (
                   <div
                     key={tour.id}
                     className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-stone-200"
@@ -349,7 +352,32 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                         {tour.durationHours}
                         {language === 'vi' ? ' giờ' : 'h'}
                       </p>
+                      <span
+                        className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                          tour.status === 'active'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : tour.status === 'booked'
+                              ? 'bg-amber-100 text-amber-900'
+                              : 'bg-stone-100 text-stone-600'
+                        }`}
+                      >
+                        {tour.status === 'active'
+                          ? language === 'vi' ? 'ĐANG MỞ' : 'OPEN'
+                          : tour.status === 'booked'
+                            ? language === 'vi' ? 'ĐANG/ĐÃ ĐƯỢC ĐẶT' : 'BOOKED'
+                            : tour.status.toUpperCase()}
+                      </span>
                     </div>
+                    {tour.status === 'booked' && canReopen && (
+                      <button
+                        type="button"
+                        onClick={() => onReopenTour(tour.id)}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg cursor-pointer shrink-0"
+                      >
+                        <i className="fa-solid fa-rotate-right mr-1.5"></i>
+                        {language === 'vi' ? 'Mở lại' : 'Reopen'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => {
@@ -362,7 +390,8 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                       <span>{language === 'vi' ? 'Sửa' : 'Edit'}</span>
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -450,18 +479,21 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
                     </div>
 
                     {b.status === 'confirmed' ? (
-                      <span className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-                        <i className="fa-solid fa-check"></i>
-                        {t.accepted}
+                      <span className="text-[11px] font-bold text-emerald-700 text-right">
+                        <i className="fa-solid fa-circle-check mr-1"></i>
+                        {language === 'vi' ? 'Đã xác nhận • chờ khách hoàn thành' : 'Confirmed • awaiting traveller completion'}
+                      </span>
+                    ) : b.status === 'completed' ? (
+                      <span className="text-xs font-bold text-blue-700 flex items-center gap-1">
+                        <i className="fa-solid fa-check-double"></i>
+                        {language === 'vi' ? 'Đã hoàn thành — hãy sửa/mở lại tour' : 'Completed — edit/reopen the tour'}
+                      </span>
+                    ) : b.status === 'cancelled' ? (
+                      <span className="text-xs font-bold text-stone-500">
+                        {language === 'vi' ? 'Tour đã được mở lại' : 'Tour was released'}
                       </span>
                     ) : (
                       <div className="flex gap-2">
-                        <button
-                          onClick={() => handleDecline(b.id)}
-                          className="px-3 py-1 bg-stone-100 hover:bg-stone-200 text-stone-600 text-xs font-bold rounded-lg cursor-pointer"
-                        >
-                          {t.declineBooking}
-                        </button>
                         <button
                           onClick={() => handleAccept(b.id)}
                           className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer"
@@ -481,4 +513,3 @@ export const HostDashboard: React.FC<HostDashboardProps> = ({
     </div>
   );
 };
-

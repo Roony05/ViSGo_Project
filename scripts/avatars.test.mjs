@@ -27,6 +27,16 @@ const STAMP = Date.now();
 const PW = 'visgo-e2e-' + STAMP;
 let pass = 0, fail = 0;
 const created = { uids: [], docs: [] };
+const KEY = ['serviceAccount.json', 'service-account.json'].find((p) => existsSync(p));
+let adminDb, adminAuth;
+if (KEY) {
+  const { cert, initializeApp: initAdmin } = await import('firebase-admin/app');
+  const { getFirestore: getAdminFirestore } = await import('firebase-admin/firestore');
+  const { getAuth: getAdminAuth } = await import('firebase-admin/auth');
+  const adminApp = initAdmin({ credential: cert(JSON.parse(readFileSync(KEY, 'utf8'))) }, `avatars-${STAMP}`);
+  adminDb = getAdminFirestore(adminApp);
+  adminAuth = getAdminAuth(adminApp);
+}
 
 const ok = async (name, fn) => {
   try { await fn(); console.log('  PASS  ' + name); pass++; }
@@ -60,14 +70,18 @@ await ok('tao hai tai khoan thu nghiem', async () => {
   const b = await createUserWithEmailAndPassword(B.auth, emailB, PW);
   uidA = a.user.uid; uidB = b.user.uid;
   created.uids.push(uidA, uidB);
-  const base = (uid, email) => ({
-    id: uid, name: 'E2E Avatar', email, role: 'customer', phone: '',
+  const base = (uid, email, role) => ({
+    id: uid, name: 'E2E Avatar', email, role, phone: '',
     avatar: '', verified: false, rating: 0, reviewCount: 0,
     totalEarnings: 0, completedTours: 0, isAcceptingGuests: false,
   });
-  await setDoc(doc(A.db, 'profiles', uidA), base(uidA, emailA));
-  await setDoc(doc(B.db, 'profiles', uidB), base(uidB, emailB));
+  await setDoc(doc(A.db, 'profiles', uidA), base(uidA, emailA, 'host'));
+  await setDoc(doc(B.db, 'profiles', uidB), base(uidB, emailB, 'customer'));
   created.docs.push(['profiles', uidA], ['profiles', uidB]);
+  if (!adminDb) throw new Error('Can serviceAccount.json de mo phong admin duyet host');
+  // Publishing now requires a real admin approval. The Admin SDK mirrors that
+  // one transition while every avatar write below still uses the client SDK.
+  await adminDb.collection('profiles').doc(uidA).update({ verified: true });
 });
 
 await ok('chu tai khoan luu duoc anh vao avatars/{uid}', async () => {
@@ -128,14 +142,9 @@ await ok('anh URL http binh thuong van luu duoc vao ho so', async () => {
 });
 
 /* ---- cleanup ---------------------------------------------------- */
-const KEY = ['serviceAccount.json', 'service-account.json'].find((p) => existsSync(p));
 if (KEY) {
-  const { cert, initializeApp: initAdmin } = await import('firebase-admin/app');
-  const { getFirestore: adminDb } = await import('firebase-admin/firestore');
-  const { getAuth: adminAuth } = await import('firebase-admin/auth');
-  initAdmin({ credential: cert(JSON.parse(readFileSync(KEY, 'utf8'))) });
-  for (const [c, id] of created.docs) await adminDb().collection(c).doc(id).delete();
-  for (const uid of created.uids) await adminAuth().deleteUser(uid).catch(() => {});
+  for (const [c, id] of created.docs) await adminDb.collection(c).doc(id).delete();
+  for (const uid of created.uids) await adminAuth.deleteUser(uid).catch(() => {});
   console.log(`\nda don ${created.docs.length} document va ${created.uids.length} tai khoan.`);
 } else {
   console.log('\nKHONG co serviceAccount.json — con lai rac test trong project.');

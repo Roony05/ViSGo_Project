@@ -23,6 +23,7 @@ import {
   isGeminiConfigured,
 } from './gemini.js';
 import { panoramaEndpoint } from './panorama.js';
+import { bookingDeliveryEndpoint } from './workspace.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.resolve(__dirname, '..', 'dist');
@@ -49,6 +50,7 @@ app.use(compression());
 app.post('/api/rag-chat', ragChatEndpoint);
 app.post('/api/translate', translateEndpoint);
 app.post('/api/host-assist', hostAssistEndpoint);
+app.post('/api/booking-delivery', bookingDeliveryEndpoint);
 app.get('/api/status', statusEndpoint);
 app.get('/api/panorama', panoramaEndpoint);
 

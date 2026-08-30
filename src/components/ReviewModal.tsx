@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { Tour, Language, User, TourReview } from '../types';
+import { Tour, Booking, Language, User, TourReview } from '../types';
 import { translations } from '../i18n/translations';
 import { sounds } from '../utils/audio';
-import { newId } from '../utils/ids';
 
 interface ReviewModalProps {
   isOpen: boolean;
   tour: Tour | null;
+  booking: Booking | null;
   activeUser: User | null;
   language: Language;
   onClose: () => void;
@@ -16,6 +16,7 @@ interface ReviewModalProps {
 export const ReviewModal: React.FC<ReviewModalProps> = ({
   isOpen,
   tour,
+  booking,
   activeUser,
   language,
   onClose,
@@ -31,7 +32,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
   // which produced a review the security rules refuse — written to local state,
   // announced as sent, and gone on the next reload. App.tsx now sends visitors
   // to sign in before this opens; this is the second lock on the same door.
-  if (!isOpen || !tour || !activeUser) return null;
+  if (!isOpen || !tour || !booking || !activeUser) return null;
 
   const availableTags = [
     'Friendly Host',
@@ -53,10 +54,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!comment.trim()) return;
-
     const newReview: TourReview = {
-      id: newId('rev'),
+      id: `review_${booking.id}`,
+      bookingId: booking.id,
       tourId: tour.id,
       userId: activeUser.id,
       userName: activeUser.name,
@@ -64,7 +64,7 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
       userCountry: 'Traveler',
       rating,
       date: new Date().toISOString().split('T')[0],
-      comment,
+      comment: comment.trim(),
       tags: selectedTags,
     };
 
@@ -150,10 +150,9 @@ export const ReviewModal: React.FC<ReviewModalProps> = ({
             </label>
             <textarea
               rows={4}
-              required
               value={comment}
               onChange={(e) => setComment(e.target.value)}
-              placeholder={t.reviewCommentPlaceholder}
+              placeholder={language === 'vi' ? 'Lý do hoặc nhận xét (không bắt buộc)' : 'Reason or comments (optional)'}
               className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs text-stone-800 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-[#A82323]"
             ></textarea>
           </div>

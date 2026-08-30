@@ -83,6 +83,21 @@ docker push "${IMAGE}"
 # and the reason the in-memory spend guard in server/gemini.ts means what it
 # says — its counters live in one process, so N instances would be N× the cap.
 echo "▶ deploy"
+RUNTIME_ENV="GEMINI_API_KEY=${GEMINI_API_KEY},GEMINI_MODEL=${GEMINI_MODEL:-},MAPILLARY_TOKEN=${MAPILLARY_TOKEN}"
+
+# Workspace delivery is optional: the booking itself still works without it,
+# but the UI will truthfully report that automatic email/calendar delivery is
+# unavailable. Refuse a half-configured set because it is harder to diagnose
+# than an intentionally disabled one.
+if [ -n "${GOOGLE_WORKSPACE_CLIENT_ID:-}${GOOGLE_WORKSPACE_CLIENT_SECRET:-}${GOOGLE_WORKSPACE_REFRESH_TOKEN:-}${FIREBASE_WEB_API_KEY:-}" ]; then
+  : "${GOOGLE_WORKSPACE_CLIENT_ID:?Thiếu GOOGLE_WORKSPACE_CLIENT_ID}"
+  : "${GOOGLE_WORKSPACE_CLIENT_SECRET:?Thiếu GOOGLE_WORKSPACE_CLIENT_SECRET}"
+  : "${GOOGLE_WORKSPACE_REFRESH_TOKEN:?Thiếu GOOGLE_WORKSPACE_REFRESH_TOKEN}"
+  : "${FIREBASE_WEB_API_KEY:?Thiếu FIREBASE_WEB_API_KEY}"
+  FIREBASE_PROJECT_ID="${FIREBASE_PROJECT_ID:-${PROJECT}}"
+  RUNTIME_ENV="${RUNTIME_ENV},FIREBASE_PROJECT_ID=${FIREBASE_PROJECT_ID},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY},GOOGLE_WORKSPACE_CLIENT_ID=${GOOGLE_WORKSPACE_CLIENT_ID},GOOGLE_WORKSPACE_CLIENT_SECRET=${GOOGLE_WORKSPACE_CLIENT_SECRET},GOOGLE_WORKSPACE_REFRESH_TOKEN=${GOOGLE_WORKSPACE_REFRESH_TOKEN}"
+fi
+
 gcloud run deploy "${SERVICE}" \
   --project="${PROJECT}" \
   --region="${REGION}" \
@@ -97,7 +112,7 @@ gcloud run deploy "${SERVICE}" \
   --cpu-throttling \
   --timeout=30s \
   --port=8080 \
-  --set-env-vars="GEMINI_API_KEY=${GEMINI_API_KEY},GEMINI_MODEL=${GEMINI_MODEL:-},MAPILLARY_TOKEN=${MAPILLARY_TOKEN}"
+  --set-env-vars="${RUNTIME_ENV}"
 
 URL=$(gcloud run services describe "${SERVICE}" \
   --project="${PROJECT}" --region="${REGION}" --format='value(status.url)')

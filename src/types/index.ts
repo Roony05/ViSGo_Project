@@ -41,6 +41,8 @@ export interface TourStop {
 
 export interface TourReview {
   id: string;
+  /** The completed booking that earned this review; one review per booking. */
+  bookingId?: string;
   tourId: string;
   userId: string;
   userName: string;
@@ -101,7 +103,10 @@ export interface Tour {
   descriptionVi: string;
   featured?: boolean;
   createdAt: string;
-  status: 'active' | 'pending' | 'draft';
+  /** `booked` reserves this single tour slot and hides it from travellers. */
+  status: 'active' | 'booked' | 'pending' | 'draft';
+  /** Booking that reserved this slot; used by Firestore rules for atomic reservation. */
+  reservedByBookingId?: string;
 }
 
 export interface Booking {
@@ -121,6 +126,8 @@ export interface Booking {
   customerPhone: string;
   bookingDate: string;
   bookingTime: string;
+  /** Unix milliseconds when this experience is scheduled to finish. */
+  tourEndsAtEpochMs?: number;
   guestsCount: number;
   totalPriceVND: number;
   totalPriceUSD: number;
@@ -147,6 +154,22 @@ export interface Booking {
   notes?: string;
   hasReviewed?: boolean;
   meetingPoint: string;
+}
+
+/** An emergency alert sent by a signed-in booking participant to ViS-Go admins. */
+export interface SosAlert {
+  id: string;
+  bookingId: string;
+  reporterId: string;
+  reporterName: string;
+  reporterRole: 'customer' | 'host';
+  customerId: string;
+  hostId: string;
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number | null;
+  createdAt: string;
+  status: 'active' | 'cancelled' | 'resolved';
 }
 
 /**
@@ -176,6 +199,8 @@ export interface ChatMessage {
 export interface Conversation {
   id: string;
   bookingId: string;
+  /** Tour that introduced the two participants; also protects pre-booking contact threads. */
+  tourId?: string;
   participants: string[];
   tourTitle: string;
   city: string;
@@ -184,6 +209,17 @@ export interface Conversation {
   lastMessageAt: Date | null;
   /** Per-participant read marker, keyed by uid. */
   lastReadAt: Record<string, Date | null>;
+  /* The two sides, denormalised. A host's inbox has to name the traveller who
+     wrote before any booking exists, and there is no booking row to read it
+     from — a threads list would otherwise say "someone" and show no face. */
+  customerId?: string;
+  hostId?: string;
+  customerName?: string;
+  hostName?: string;
+  hostAvatar?: string;
+  hostPhone?: string;
+  bookingDate?: string;
+  bookingTime?: string;
 }
 
 /**
